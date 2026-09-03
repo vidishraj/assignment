@@ -9,9 +9,11 @@ import { Router } from 'express';
 import type { AppDeps } from './app.js';
 import { AppError } from './errors.js';
 import { makeCartService } from './services/cart-service.js';
+import { makeCheckoutService } from './services/checkout-service.js';
 
 export function makeRouter(deps: AppDeps): Router {
   const carts = makeCartService(deps.repos);
+  const checkout = makeCheckoutService(deps.repos);
   const router = Router();
 
   // --- catalogue (handy for evaluators to see stock) ---
@@ -42,6 +44,24 @@ export function makeRouter(deps: AppDeps): Router {
 
   router.delete('/carts/:id/items/:productId', (req, res) => {
     res.json(carts.removeItem(req.params.id, req.params.productId));
+  });
+
+  // --- checkout ---
+  router.post('/carts/:id/checkout', (req, res) => {
+    // 201 on the first placement, 200 when an idempotent retry returns the
+    // existing order.
+    const wasCheckedOut = deps.repos.carts.get(req.params.id)?.status === 'CHECKED_OUT';
+    const order = checkout.checkout(req.params.id);
+    res.status(wasCheckedOut ? 200 : 201).json(order);
+  });
+
+  // --- orders ---
+  router.get('/orders/:id', (req, res) => {
+    const order = deps.repos.orders.get(req.params.id);
+    if (!order) {
+      throw new AppError('ORDER_NOT_FOUND', `no order ${req.params.id}`, { id: req.params.id });
+    }
+    res.json(order);
   });
 
   return router;
