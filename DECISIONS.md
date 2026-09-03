@@ -318,9 +318,12 @@ happy paths, the suite exercises:
   `AVAILABLE` and is redeemable afterwards.
 - **Concurrent redemption** — two carts, one coupon → exactly one redeems.
 - **Concurrent generation** — many admin requests at one milestone → one coupon.
-- **`reserve()` at the store level** — the conditional decrement returns false and
-  does not mutate when stock is insufficient (pins the no-oversell primitive
-  directly, against both stores).
+- **`reserve()` and `redeem()` at the store level** — the conditional decrement
+  returns false and does not mutate when stock is insufficient, and `redeem()`
+  returns false and mutates nothing on a second call. These pin the two per-statement
+  atomicity primitives (no-oversell, coupon single-use) directly and deterministically
+  against both stores — the coupon one specifically because a cross-process race
+  catches it only ~3% of the time (see the multi-instance section).
 - **Malformed/oversized bodies** → `400` / `413`, never `500`.
 - **Report is a pure projection** — two successive calls are deep-equal.
 - **Randomised interleavings** — a fixed-seed property test runs 12 rounds of a
@@ -473,6 +476,34 @@ a single-node SQLite file is still **not** a multi-node production database (no
 network partitions, no replica lag, one machine's filesystem lock) — it demonstrates
 the concurrency *design* survives real inter-process locking, not that a distributed
 deployment is proven.
+
+**Which mechanism protects which invariant — and a limit of the contention test.**
+I mutation-tested the contention proof itself, which sharpened the picture and
+surfaced a real (if rare) issue. Removing `BEGIN IMMEDIATE` (running the body without
+an explicit transaction) leaves **inventory** perfectly safe — it held at exactly 50
+across **37 runs** — because the conditional decrement is a *single* `UPDATE`, atomic
+per statement in SQLite regardless of any surrounding transaction. **Coupon
+single-use was different:** redemption used to be a read (validate `AVAILABLE`) then a
+*separate* write (`save` as `REDEEMED`), so without a transaction two processes could
+both read `AVAILABLE` and both redeem. That double-redemption **actually manifested
+once in 37 runs (~3%)** — two processes each reported redeeming the same coupon. That
+is precisely the dangerous class of bug: at 3% it would sail through CI while the
+invariant was broken. So the contention test is a good *demonstration* but a poor
+*regression guard* for that property — a guarantee only a flaky race can catch is
+effectively untested.
+
+The fix follows the `reserve()` pattern: I made redemption a **single atomic
+conditional write**, `coupons.redeem(code, orderId)` →
+`UPDATE coupons SET status='REDEEMED' … WHERE status='AVAILABLE'` (0 rows ⇒ already
+redeemed). Now coupon single-use is atomic per statement *like* inventory, no longer
+dependent on the transaction to win the race, and it is pinned by a **deterministic
+store-level test** on both stores (`redeem()` returns false and mutates nothing on a
+second call) rather than by a 3%-of-the-time cross-process interleaving. `BEGIN
+IMMEDIATE` still earns its place — it makes the *set* of writes (reserve, redeem,
+order insert, cart close) all-or-nothing under rollback — but neither single-use
+guarantee now hinges on the flaky window. Stated plainly because the honesty is the
+point: we observed the race once and could not reproduce it in 36 further attempts,
+so we moved the property somewhere it is tested every run.
 
 better-sqlite3 is optional and loaded lazily, so a machine that can't build the
 native module still gets a green `npm ci` and default `npm test`; the SQLite and
