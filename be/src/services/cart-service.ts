@@ -15,6 +15,16 @@ import { lineTotal, sumCents } from '../money.js';
 import { AppError } from '../errors.js';
 import type { Repositories } from '../repository.js';
 
+/**
+ * The most units of a single product one cart line may hold. This is a domain
+ * cap, not a technical one: a real checkout never legitimately orders thousands
+ * of one item, and bounding it here keeps every line total (and therefore every
+ * subtotal) a safe integer, so the integer-cents money invariant can't be
+ * defeated by a huge quantity overflowing 2^53. Enforced on the ACCUMULATED
+ * quantity, so repeated adds can't sneak past it either. (See DECISIONS.md.)
+ */
+export const MAX_LINE_QUANTITY = 1000;
+
 export interface CartViewLine {
   productId: string;
   name: string;
@@ -36,6 +46,17 @@ function assertPositiveQuantity(quantity: unknown): number {
     throw new AppError('INVALID_QUANTITY', 'quantity must be a positive integer', { quantity });
   }
   return quantity;
+}
+
+/** Reject a resulting line quantity above the domain cap. */
+function assertWithinLineLimit(quantity: number, productId: string): void {
+  if (quantity > MAX_LINE_QUANTITY) {
+    throw new AppError(
+      'QUANTITY_LIMIT_EXCEEDED',
+      `a cart line may hold at most ${MAX_LINE_QUANTITY} units of a product`,
+      { productId, requested: quantity, limit: MAX_LINE_QUANTITY },
+    );
+  }
 }
 
 export function makeCartService(repos: Repositories) {
@@ -106,7 +127,9 @@ export function makeCartService(repos: Repositories) {
       const cart = loadOpen(cartId);
       requireProduct(productId);
       const existing = cart.items.find((i) => i.productId === productId);
-      if (existing) existing.quantity += qty;
+      const resulting = existing ? existing.quantity + qty : qty;
+      assertWithinLineLimit(resulting, productId);
+      if (existing) existing.quantity = resulting;
       else cart.items.push({ productId, quantity: qty });
       repos.carts.save(cart);
       return view(cartId);
@@ -115,6 +138,7 @@ export function makeCartService(repos: Repositories) {
     /** Set the exact quantity of an item already in the cart. */
     setQuantity(cartId: string, productId: string, quantity: unknown): CartView {
       const qty = assertPositiveQuantity(quantity);
+      assertWithinLineLimit(qty, productId);
       const cart = loadOpen(cartId);
       const item = cart.items.find((i) => i.productId === productId);
       if (!item) {

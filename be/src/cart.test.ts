@@ -75,6 +75,42 @@ test('update quantity and remove item', async () => {
   }
 });
 
+test('quantity is bounded so a cart line total stays a safe integer', async () => {
+  const server = await startServer();
+  try {
+    const { body: cart } = await api<CartView>(server.baseUrl, 'POST', '/carts');
+
+    // One absurd request: passes the positive-integer check but must be capped,
+    // otherwise the line total exceeds 2^53 and the integer-cents invariant breaks.
+    const huge = await api<{ error: { code: string } }>(
+      server.baseUrl,
+      'POST',
+      `/carts/${cart.id}/items`,
+      { productId: 'p-mug', quantity: 1e15 },
+    );
+    assert.equal(huge.status, 422);
+    assert.equal(huge.body.error.code, 'QUANTITY_LIMIT_EXCEEDED');
+
+    // The cap applies to the ACCUMULATED quantity, not just a single request:
+    // 600 then another 600 = 1200 > 1000 must be rejected, and the earlier 600
+    // must remain intact (rejected add is a no-op).
+    await api(server.baseUrl, 'POST', `/carts/${cart.id}/items`, { productId: 'p-mug', quantity: 600 });
+    const overflow = await api<{ error: { code: string } }>(
+      server.baseUrl,
+      'POST',
+      `/carts/${cart.id}/items`,
+      { productId: 'p-mug', quantity: 600 },
+    );
+    assert.equal(overflow.status, 422);
+    assert.equal(overflow.body.error.code, 'QUANTITY_LIMIT_EXCEEDED');
+    const view = await api<CartView>(server.baseUrl, 'GET', `/carts/${cart.id}`);
+    assert.equal(view.body.items[0].quantity, 600);
+    assert.equal(Number.isSafeInteger(view.body.subtotalCents), true);
+  } finally {
+    await server.close();
+  }
+});
+
 test('validation: bad quantity, unknown product, unknown cart, item not in cart', async () => {
   const server = await startServer();
   try {
