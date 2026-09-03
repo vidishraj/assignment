@@ -19,7 +19,8 @@ The service lives in [`be/`](be/). Everything below runs from there.
 
 ## Stack
 
-TypeScript + Node (≥20) + Express. In-memory store behind a repository interface
+TypeScript + Node (≥20) + Express. In-memory store by default (with an optional
+SQLite store, below) behind a repository interface
 (the seam for a real database — see DECISIONS.md). No database, no external
 services, no credentials required.
 

@@ -4,8 +4,8 @@ Design record for the **Reliable Checkout & Rewards Service** (the `be/` track).
 The governing brief is [`be/README.md`](be/README.md); the root brief that used to
 live here was an older, softer version and does not describe this assignment.
 
-Approximate time spent: **~2–2.5 hours** wall clock (git history runs 06:45 → 08:40,
-with a ~1h gap during a review cycle). That figure reflects how the work was
+Approximate time spent: **~3.5 hours** wall clock (git history runs 06:45 → 10:09,
+including review-and-revision cycles). That figure reflects how the work was
 produced — a multi-agent pipeline I built and direct, not solo hand-coding — which I
 disclose in full under *How I used AI tools* below. Where I stopped short of
 production hardening I say so explicitly rather than leave a silent gap.
@@ -310,9 +310,14 @@ happy paths, the suite exercises:
 
 **Mutation check (guarding against vacuous tests):** the brief warns that a test
 that passes on both correct and broken code is worse than none. I verified the key
-tests actually fail when the implementation is wrong by temporarily breaking it:
-disabling the inventory guard turned 4 tests red; disabling cart idempotency turned
-2 red; disabling the coupon single-use guard turned 2 red. Each break was reverted.
+tests actually fail when the implementation is wrong by temporarily breaking it (all
+reverted): disabling cart idempotency turned 2 tests red; disabling the coupon
+single-use guard turned 3 red. Inventory has **two independent guards** — the
+validate-first check and the conditional-decrement `reserve()` — so breaking *either
+one alone* turns 0 red (the other still catches the oversell); breaking *both*
+turns 5 red (atomic-rejection, oversell, conservation, coupon-failure-safety, and the
+randomised property test). That defense-in-depth is deliberate, and the mutation
+numbers are exact at the current commit.
 
 ---
 
@@ -321,14 +326,17 @@ disabling the inventory guard turned 4 tests red; disabling cart idempotency tur
 **Implemented:** products/inventory, carts (create/add/update/remove/view with live
 totals), oversell-safe idempotent checkout, immutable orders, milestone coupon
 generation and single-use failure-safe redemption, admin report, a typed error
-model incl. malformed-body handling, and the test suite above.
+model incl. malformed-body handling, the test suite above, an optional SQLite store
+behind the same repository interface (same suite green on both), an OpenAPI 3.1
+document, and a GitHub Actions CI pipeline.
 
 **Deferred, on purpose:**
 - **Frontend** — the brief marks it optional and says it "will not compensate for an
   unreliable backend." I put the whole budget into backend correctness. A reviewer
   can exercise everything via the documented HTTP API / curl examples.
-- **Persistence** — in-memory behind a repository interface. Acceptable per the
-  brief; the interface is the seam for a real DB (below).
+- **Durable persistence** — the *default* store is in-memory (acceptable per the
+  brief). An optional SQLite store (below) implements the same interface and proves
+  the seam, but a durable, multi-process production database is deferred.
 - **AuthN/AuthZ** — not required. Admin routes are identified by their `/admin`
   prefix; there is no enforcement.
 - **Payment** — successful checkout *is* payment success; there is no gateway. It is
@@ -414,7 +422,7 @@ skips with a clear message.
 than hand-coding solo: an **implementer** that writes the code and tests, an
 **independent reviewer** that does not commit and only critiques, and a
 **verification layer** that reproduces every claim against a running server before
-it is accepted. The ~2h wall-clock figure reflects that parallelism, not a claim
+it is accepted. The ~3.5h wall-clock figure reflects that parallelism, not a claim
 about typing speed. I own every line and every decision here; the value I add is the
 adversarial input, the judgment about which fix is defensible, and the wiring of a
 process that tries to catch its own mistakes. The two stories below are that process
@@ -459,10 +467,14 @@ rather than a self-check that trusts them — is worth building. The miss is the
 
 1. **A first-class `Idempotency-Key`** at the HTTP edge, closing the "new cart →
    second order" gap that cart-based idempotency leaves open.
-2. **A property-based concurrency test** — random interleavings of checkouts and
-   generations asserting the conservation and single-use invariants, to hunt races
-   a fixed 6-way test can't.
-3. **Swap in SQLite** behind the existing repository interfaces and re-run the same
-   tests, to prove the concurrency story survives a real transaction and to make the
-   multi-instance claims above executable rather than asserted.
+2. **Genuine multi-process contention.** The SQLite store proves the seam and the
+   transaction shape, but the tests still run in one process against `:memory:`. I'd
+   run multiple instances against a shared file/server database and hammer them with
+   concurrent checkouts to prove the `BEGIN IMMEDIATE` / conditional-decrement story
+   holds under real cross-process contention, not just a single event loop.
+3. **An actually-implemented `reserve → charge → confirm-or-release` payment flow.**
+   Today checkout treats success as payment; I'd add the two-phase flow described in
+   the payment deferral (reserve synchronously, exit the section, await a fake
+   gateway, re-enter to confirm or compensate) and the coupon `RESERVED` state it
+   requires — the one place a real `await` legitimately enters the design.
 4. **Coupon ownership / opaque codes**, once a customer model exists.
