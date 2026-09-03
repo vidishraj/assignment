@@ -12,6 +12,7 @@ import { makeCartService } from './services/cart-service.js';
 import { makeCheckoutService } from './services/checkout-service.js';
 import { makeCouponService } from './services/coupon-service.js';
 import { makeReportService } from './services/report-service.js';
+import { makeRateLimiter } from './rate-limit.js';
 
 export function makeRouter(deps: AppDeps): Router {
   const carts = makeCartService(deps.repos);
@@ -19,6 +20,10 @@ export function makeRouter(deps: AppDeps): Router {
   const coupons = makeCouponService(deps.repos, deps.config);
   const reports = makeReportService(deps.repos);
   const router = Router();
+
+  // Rate-limit the mutating routes only. One shared limiter instance so its
+  // window persists across requests; empty (no-op) when disabled in config.
+  const mutating = deps.config.rateLimit ? [makeRateLimiter(deps.config.rateLimit)] : [];
 
   // --- catalogue (handy for evaluators to see stock) ---
   router.get('/products', (_req, res) => {
@@ -51,7 +56,7 @@ export function makeRouter(deps: AppDeps): Router {
   });
 
   // --- checkout ---
-  router.post('/carts/:id/checkout', (req, res) => {
+  router.post('/carts/:id/checkout', ...mutating, (req, res) => {
     const couponCode = req.body?.couponCode;
     if (couponCode !== undefined && typeof couponCode !== 'string') {
       throw new AppError('VALIDATION_ERROR', 'couponCode must be a string when provided');
@@ -66,7 +71,7 @@ export function makeRouter(deps: AppDeps): Router {
 
   // --- administration ---
   // Mint a coupon for the next unrewarded milestone (409 if none is due).
-  router.post('/admin/coupons', (_req, res) => {
+  router.post('/admin/coupons', ...mutating, (_req, res) => {
     res.status(201).json(coupons.generate());
   });
 

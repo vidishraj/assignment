@@ -3,6 +3,7 @@ import type { AppConfig } from './config.js';
 import { validateConfig } from './config.js';
 import type { Repositories } from './repository.js';
 import { errorHandler } from './errors.js';
+import { defaultLogger, requestContext, type Logger } from './logging.js';
 import { makeRouter } from './routes.js';
 
 /**
@@ -14,6 +15,8 @@ import { makeRouter } from './routes.js';
 export interface AppDeps {
   config: AppConfig;
   repos: Repositories;
+  /** Structured-log sink; defaults to one JSON line per request on stdout. */
+  log?: Logger;
 }
 
 /** Build an Express app. No side effects (no listen) so tests can drive it. */
@@ -23,6 +26,8 @@ export function createApp(deps: AppDeps): Express {
   validateConfig(deps.config);
 
   const app = express();
+  // First: assign a request id, echo it, and log one structured line per request.
+  app.use(requestContext(deps.log ?? defaultLogger));
   app.use(express.json());
 
   app.get('/health', (_req, res) => {

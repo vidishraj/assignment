@@ -23,7 +23,12 @@ function makeRepositories(): Repositories {
 export function buildDeps(config: Partial<AppConfig> = {}): AppDeps {
   const repos = makeRepositories();
   seedProducts(repos.products);
-  return { config: { milestoneInterval: 3, discountPercent: 10, ...config }, repos };
+  // Rate limiting is off by default in tests (concurrency tests fire many
+  // requests from one IP); a dedicated test opts in with a low limit.
+  return {
+    config: { milestoneInterval: 3, discountPercent: 10, rateLimit: null, ...config },
+    repos,
+  };
 }
 
 export interface TestServer {

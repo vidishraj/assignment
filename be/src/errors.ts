@@ -19,6 +19,7 @@ export type ErrorCode =
   | 'ITEM_NOT_IN_CART'
   | 'CART_ALREADY_CHECKED_OUT'
   | 'IDEMPOTENCY_KEY_REUSED'
+  | 'RATE_LIMITED'
   | 'ORDER_NOT_FOUND'
   | 'COUPON_INVALID'
   | 'COUPON_ALREADY_REDEEMED'
@@ -37,6 +38,7 @@ const STATUS_BY_CODE: Record<ErrorCode, number> = {
   ITEM_NOT_IN_CART: 404,
   CART_ALREADY_CHECKED_OUT: 409,
   IDEMPOTENCY_KEY_REUSED: 422,
+  RATE_LIMITED: 429,
   ORDER_NOT_FOUND: 404,
   COUPON_INVALID: 400,
   COUPON_ALREADY_REDEEMED: 409,
@@ -84,13 +86,16 @@ export function errorHandler(
   res: Response,
   _next: NextFunction, // required 4th arg so Express treats this as error middleware
 ): void {
+  const requestId = res.locals.requestId as string | undefined;
   const appError = err instanceof AppError ? err : translateFrameworkError(err);
   if (appError) {
-    res
-      .status(appError.status)
-      .json({ error: { code: appError.code, message: appError.message, details: appError.details } });
+    res.locals.errorCode = appError.code; // picked up by the request logger
+    res.status(appError.status).json({
+      error: { code: appError.code, message: appError.message, details: appError.details, requestId },
+    });
     return;
   }
+  res.locals.errorCode = 'INTERNAL';
   console.error('unexpected error', err);
-  res.status(500).json({ error: { code: 'INTERNAL', message: 'Internal server error' } });
+  res.status(500).json({ error: { code: 'INTERNAL', message: 'Internal server error', requestId } });
 }
