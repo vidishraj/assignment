@@ -10,10 +10,12 @@ import type { AppDeps } from './app.js';
 import { AppError } from './errors.js';
 import { makeCartService } from './services/cart-service.js';
 import { makeCheckoutService } from './services/checkout-service.js';
+import { makeCouponService } from './services/coupon-service.js';
 
 export function makeRouter(deps: AppDeps): Router {
   const carts = makeCartService(deps.repos);
   const checkout = makeCheckoutService(deps.repos);
+  const coupons = makeCouponService(deps.repos, deps.config);
   const router = Router();
 
   // --- catalogue (handy for evaluators to see stock) ---
@@ -53,6 +55,12 @@ export function makeRouter(deps: AppDeps): Router {
     const wasCheckedOut = deps.repos.carts.get(req.params.id)?.status === 'CHECKED_OUT';
     const order = checkout.checkout(req.params.id);
     res.status(wasCheckedOut ? 200 : 201).json(order);
+  });
+
+  // --- administration ---
+  // Mint a coupon for the next unrewarded milestone (409 if none is due).
+  router.post('/admin/coupons', (_req, res) => {
+    res.status(201).json(coupons.generate());
   });
 
   // --- orders ---
