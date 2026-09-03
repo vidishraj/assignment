@@ -18,15 +18,22 @@
  *
  * ATOMICITY: all items are validated BEFORE any inventory is decremented, so a
  * failed checkout leaves inventory untouched (all-or-nothing reservation).
+ *
+ * COUPONS: an optional coupon is validated (exists + still AVAILABLE) in the same
+ * read-only phase as inventory, and only marked REDEEMED in the mutation phase
+ * once everything has passed. So a checkout that fails on inventory never
+ * consumes the coupon (it stays AVAILABLE for a retry), and because the whole
+ * section is synchronous, two concurrent checkouts cannot both redeem it — the
+ * second sees REDEEMED and is rejected.
  */
 import { randomUUID } from 'node:crypto';
-import type { Order, OrderLine } from '../domain/types.js';
-import { lineTotal, sumCents } from '../money.js';
+import type { Coupon, Order, OrderLine } from '../domain/types.js';
+import { lineTotal, percentDiscount, sumCents } from '../money.js';
 import { AppError } from '../errors.js';
 import type { Repositories } from '../repository.js';
 
 export function makeCheckoutService(repos: Repositories) {
-  function checkout(cartId: string): Order {
+  function checkout(cartId: string, couponCode?: string): Order {
     const cart = repos.carts.get(cartId);
     if (!cart) throw new AppError('CART_NOT_FOUND', `no cart ${cartId}`, { cartId });
 
@@ -42,7 +49,24 @@ export function makeCheckoutService(repos: Repositories) {
       throw new AppError('CART_EMPTY', `cart ${cartId} has no items`, { cartId });
     }
 
-    // 1) Validate everything first — no mutation yet.
+    // 1a) Validate the coupon (read-only). Redemption happens later, only if the
+    //     whole checkout succeeds — a failed checkout must not consume it.
+    let coupon: Coupon | undefined;
+    if (couponCode !== undefined) {
+      const found = repos.coupons.get(couponCode);
+      if (!found) {
+        throw new AppError('COUPON_INVALID', `no coupon ${couponCode}`, { couponCode });
+      }
+      if (found.status !== 'AVAILABLE') {
+        throw new AppError('COUPON_ALREADY_REDEEMED', `coupon ${couponCode} was already redeemed`, {
+          couponCode,
+          redeemedByOrderId: found.redeemedByOrderId,
+        });
+      }
+      coupon = found;
+    }
+
+    // 1b) Validate everything first — no mutation yet.
     const lines: OrderLine[] = cart.items.map((item) => {
       const product = repos.products.get(item.productId);
       if (!product) {
@@ -67,6 +91,13 @@ export function makeCheckoutService(repos: Repositories) {
       };
     });
 
+    // Everything above is read-only. From here on we mutate — all validation has
+    // passed, so these steps cannot fail on business rules.
+
+    const orderId = randomUUID();
+    const subtotalCents = sumCents(lines.map((l) => l.lineTotalCents));
+    const discountCents = coupon ? percentDiscount(subtotalCents, coupon.discountPercent) : 0;
+
     // 2) Reserve inventory (all items validated above → safe to commit all).
     for (const item of cart.items) {
       const product = repos.products.get(item.productId)!;
@@ -74,21 +105,28 @@ export function makeCheckoutService(repos: Repositories) {
       repos.products.save(product);
     }
 
-    // 3) Create the immutable order. (Coupons/discounts arrive in a later step.)
-    const subtotalCents = sumCents(lines.map((l) => l.lineTotalCents));
+    // 3) Redeem the coupon, if one was supplied (validated AVAILABLE above).
+    if (coupon) {
+      coupon.status = 'REDEEMED';
+      coupon.redeemedByOrderId = orderId;
+      repos.coupons.save(coupon);
+    }
+
+    // 4) Create the immutable order.
     const order: Order = {
-      id: randomUUID(),
+      id: orderId,
       cartId: cart.id,
       status: 'PLACED',
       lines,
       subtotalCents,
-      discountCents: 0,
-      totalCents: subtotalCents,
+      discountCents,
+      totalCents: subtotalCents - discountCents,
+      ...(coupon ? { couponCode: coupon.code } : {}),
       createdAt: new Date().toISOString(),
     };
     repos.orders.save(order);
 
-    // 4) Close the cart and link the order (enables the idempotent retry above).
+    // 5) Close the cart and link the order (enables the idempotent retry above).
     cart.status = 'CHECKED_OUT';
     cart.orderId = order.id;
     repos.carts.save(cart);
