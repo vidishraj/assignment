@@ -60,6 +60,22 @@ export interface Order {
   readonly createdAt: string;
 }
 
+/**
+ * A stored idempotency-key result. The key lets a client that lost the response
+ * and started a NEW cart safely retry: the same key returns the same order rather
+ * than placing a second one. We store the order id (the order itself is immutable,
+ * so re-fetching it yields an identical response) plus a fingerprint of the
+ * request, so the same key with a DIFFERENT request is rejected rather than
+ * silently returning the wrong order.
+ */
+export interface IdempotencyRecord {
+  key: string;
+  orderId: string;
+  requestFingerprint: string;
+  httpStatus: number;
+  createdAt: string;
+}
+
 export type CouponStatus = 'AVAILABLE' | 'REDEEMED';
 
 export interface Coupon {

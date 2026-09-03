@@ -19,6 +19,7 @@ import type { Coupon, Order, OrderLine, Product } from '../domain/types.js';
 import type {
   CartRepository,
   CouponRepository,
+  IdempotencyRepository,
   OrderRepository,
   ProductRepository,
   Repositories,
@@ -48,6 +49,10 @@ CREATE TABLE order_lines (
 CREATE TABLE coupons (
   code TEXT PRIMARY KEY, discount_percent INTEGER NOT NULL, milestone INTEGER NOT NULL UNIQUE,
   status TEXT NOT NULL, redeemed_by_order_id TEXT, created_at TEXT NOT NULL
+);
+CREATE TABLE idempotency_keys (
+  key TEXT PRIMARY KEY, order_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL,
+  http_status INTEGER NOT NULL, created_at TEXT NOT NULL
 );
 `;
 
@@ -175,11 +180,32 @@ export function createSqliteRepositories(filename = ':memory:'): Repositories {
     },
   };
 
+  const idempotency: IdempotencyRepository = {
+    get(key) {
+      const row = db.prepare('SELECT * FROM idempotency_keys WHERE key = ?').get(key);
+      if (!row) return undefined;
+      return {
+        key: row.key,
+        orderId: row.order_id,
+        requestFingerprint: row.request_fingerprint,
+        httpStatus: row.http_status,
+        createdAt: row.created_at,
+      };
+    },
+    save(record) {
+      db.prepare(
+        `INSERT INTO idempotency_keys (key, order_id, request_fingerprint, http_status, created_at)
+         VALUES (@key, @orderId, @requestFingerprint, @httpStatus, @createdAt)`,
+      ).run(record);
+    },
+  };
+
   return {
     products,
     carts,
     orders,
     coupons,
+    idempotency,
     // Real transaction: BEGIN IMMEDIATE takes the write lock up front, so the
     // synchronous critical section runs with no interleaving and rolls back if
     // it throws. Same call site as the in-memory no-op wrapper.

@@ -7,10 +7,11 @@
  * concurrency reasoning explicit and small, and maps cleanly onto a DB
  * transaction when the store is swapped.
  */
-import type { Cart, Coupon, Order, Product } from '../domain/types.js';
+import type { Cart, Coupon, IdempotencyRecord, Order, Product } from '../domain/types.js';
 import type {
   CartRepository,
   CouponRepository,
+  IdempotencyRepository,
   OrderRepository,
   ProductRepository,
   Repositories,
@@ -74,12 +75,23 @@ class MemoryCouponRepository implements CouponRepository {
   }
 }
 
+class MemoryIdempotencyRepository implements IdempotencyRepository {
+  private readonly byKey = new Map<string, IdempotencyRecord>();
+  get(key: string) {
+    return this.byKey.get(key);
+  }
+  save(record: IdempotencyRecord) {
+    this.byKey.set(record.key, record);
+  }
+}
+
 export function createMemoryRepositories(): Repositories {
   return {
     products: new MemoryProductRepository(),
     carts: new MemoryCartRepository(),
     orders: new MemoryOrderRepository(),
     coupons: new MemoryCouponRepository(),
+    idempotency: new MemoryIdempotencyRepository(),
     // A synchronous function is already atomic under the event loop, so the
     // in-memory "transaction" is just running it. (The SQLite store wraps this
     // in BEGIN IMMEDIATE — same call site, real transactional semantics there.)

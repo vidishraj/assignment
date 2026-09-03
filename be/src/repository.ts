@@ -7,7 +7,7 @@
  * critical section here become a transaction (conditional UPDATE / row lock)
  * there. That is the multi-instance story in DECISIONS.md.
  */
-import type { Cart, Coupon, Order, Product } from './domain/types.js';
+import type { Cart, Coupon, IdempotencyRecord, Order, Product } from './domain/types.js';
 
 export interface ProductRepository {
   get(id: string): Product | undefined;
@@ -43,11 +43,17 @@ export interface CouponRepository {
   save(coupon: Coupon): void;
 }
 
+export interface IdempotencyRepository {
+  get(key: string): IdempotencyRecord | undefined;
+  save(record: IdempotencyRecord): void;
+}
+
 export interface Repositories {
   products: ProductRepository;
   carts: CartRepository;
   orders: OrderRepository;
   coupons: CouponRepository;
+  idempotency: IdempotencyRepository;
   /**
    * Run `fn` as one atomic unit. For the in-memory store this just calls `fn`
    * (a synchronous function is already atomic under Node's event loop). For a

@@ -56,11 +56,12 @@ export function makeRouter(deps: AppDeps): Router {
     if (couponCode !== undefined && typeof couponCode !== 'string') {
       throw new AppError('VALIDATION_ERROR', 'couponCode must be a string when provided');
     }
-    // 201 on the first placement, 200 when an idempotent retry returns the
-    // existing order.
-    const wasCheckedOut = deps.repos.carts.get(req.params.id)?.status === 'CHECKED_OUT';
-    const order = checkout.checkout(req.params.id, couponCode);
-    res.status(wasCheckedOut ? 200 : 201).json(order);
+    // Optional Idempotency-Key: lets a client that lost the response retry
+    // (even with a new cart) without placing a second order. The service returns
+    // the HTTP status to send (201 first placement, 200 replay).
+    const idempotencyKey = req.header('Idempotency-Key') || undefined;
+    const { order, status } = checkout.checkout(req.params.id, couponCode, idempotencyKey);
+    res.status(status).json(order);
   });
 
   // --- administration ---

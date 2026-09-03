@@ -26,28 +26,72 @@
  * section is synchronous, two concurrent checkouts cannot both redeem it — the
  * second sees REDEEMED and is rejected.
  */
-import { randomUUID } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import type { Coupon, Order, OrderLine } from '../domain/types.js';
 import { lineTotal, percentDiscount, sumCents } from '../money.js';
 import { AppError } from '../errors.js';
 import type { Repositories } from '../repository.js';
 
+/** What checkout returns: the order and the HTTP status the edge should send. */
+export interface CheckoutOutcome {
+  order: Order;
+  /** 201 first placement, 200 idempotent replay (cart- or key-based). */
+  status: number;
+}
+
+/** Stable fingerprint of the checkout request, so a reused key with a different
+ * request is caught rather than served the wrong stored order. */
+function fingerprint(cartId: string, couponCode?: string): string {
+  return createHash('sha256').update(`${cartId}\n${couponCode ?? ''}`).digest('hex');
+}
+
 export function makeCheckoutService(repos: Repositories) {
-  // The whole critical section runs inside one transaction: a no-op wrapper for
-  // the in-memory store (the event loop already serialises it) and a real
-  // BEGIN IMMEDIATE for SQLite. `runCheckout` stays synchronous so both hold.
-  function checkout(cartId: string, couponCode?: string): Order {
-    return repos.transaction(() => runCheckout(cartId, couponCode));
+  // The whole critical section — idempotency-key lookup, checkout, and key
+  // store — runs inside ONE transaction: a no-op wrapper for the in-memory store
+  // (the event loop already serialises it) and a real BEGIN IMMEDIATE for SQLite.
+  // Everything stays synchronous, so there is no suspension point and two
+  // concurrent same-key requests cannot both execute.
+  function checkout(cartId: string, couponCode?: string, idempotencyKey?: string): CheckoutOutcome {
+    return repos.transaction(() => {
+      // Idempotency-Key layer: cross-cart retry safety. (The cart layer below
+      // still handles same-cart replays.)
+      if (idempotencyKey !== undefined) {
+        const fp = fingerprint(cartId, couponCode);
+        const seen = repos.idempotency.get(idempotencyKey);
+        if (seen) {
+          if (seen.requestFingerprint !== fp) {
+            throw new AppError(
+              'IDEMPOTENCY_KEY_REUSED',
+              'this Idempotency-Key was already used for a different request',
+              { idempotencyKey },
+            );
+          }
+          const order = repos.orders.get(seen.orderId);
+          if (order) return { order, status: seen.httpStatus };
+          // Record without a live order shouldn't happen; fall through to re-run.
+        }
+        const outcome = runCheckout(cartId, couponCode);
+        repos.idempotency.save({
+          key: idempotencyKey,
+          orderId: outcome.order.id,
+          requestFingerprint: fp,
+          httpStatus: outcome.status,
+          createdAt: new Date().toISOString(),
+        });
+        return outcome;
+      }
+      return runCheckout(cartId, couponCode);
+    });
   }
 
-  function runCheckout(cartId: string, couponCode?: string): Order {
+  function runCheckout(cartId: string, couponCode?: string): CheckoutOutcome {
     const cart = repos.carts.get(cartId);
     if (!cart) throw new AppError('CART_NOT_FOUND', `no cart ${cartId}`, { cartId });
 
-    // Idempotent retry: this cart already produced an order — return it.
+    // Idempotent retry: this cart already produced an order — return it (200).
     if (cart.status === 'CHECKED_OUT') {
       const existing = cart.orderId ? repos.orders.get(cart.orderId) : undefined;
-      if (existing) return existing;
+      if (existing) return { order: existing, status: 200 };
       // Shouldn't happen (checked-out carts always have an order), but fail loud.
       throw new AppError('CART_ALREADY_CHECKED_OUT', `cart ${cartId} is checked out`, { cartId });
     }
@@ -143,7 +187,7 @@ export function makeCheckoutService(repos: Repositories) {
     cart.orderId = order.id;
     repos.carts.save(cart);
 
-    return order;
+    return { order, status: 201 };
   }
 
   return { checkout };
