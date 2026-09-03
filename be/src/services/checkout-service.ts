@@ -161,11 +161,15 @@ export function makeCheckoutService(repos: Repositories) {
       }
     }
 
-    // 3) Redeem the coupon, if one was supplied (validated AVAILABLE above).
-    if (coupon) {
-      coupon.status = 'REDEEMED';
-      coupon.redeemedByOrderId = orderId;
-      repos.coupons.save(coupon);
+    // 3) Redeem the coupon via the atomic conditional primitive (mirrors
+    //    `reserve()`): a single `UPDATE … WHERE status = 'AVAILABLE'`. Validation
+    //    above already checked availability, so the guard is defensive in one
+    //    process — but under real cross-process contention it is what makes
+    //    single-use atomic per statement rather than a read-then-write race.
+    if (coupon && !repos.coupons.redeem(coupon.code, orderId)) {
+      throw new AppError('COUPON_ALREADY_REDEEMED', `coupon ${coupon.code} was already redeemed`, {
+        couponCode: coupon.code,
+      });
     }
 
     // 4) Create the immutable order.

@@ -28,3 +28,29 @@ test('reserve() decrements only when stock suffices, and never mutates on failur
   // Unknown product reserves nothing.
   assert.equal(products.reserve('nope', 1), false);
 });
+
+test('redeem() marks a coupon REDEEMED once and refuses a second redemption', () => {
+  // Pins coupon single-use at the primitive level, deterministically, so it does
+  // not depend on a rare cross-process interleaving to be exercised. (See the
+  // multi-instance section of DECISIONS.md for why this matters.)
+  const coupons = buildDeps().repos.coupons;
+  coupons.save({
+    code: 'ONCE',
+    discountPercent: 10,
+    milestone: 1,
+    status: 'AVAILABLE',
+    createdAt: new Date(0).toISOString(),
+  });
+
+  // First redemption wins and records the order.
+  assert.equal(coupons.redeem('ONCE', 'order-A'), true);
+  assert.equal(coupons.get('ONCE')!.status, 'REDEEMED');
+  assert.equal(coupons.get('ONCE')!.redeemedByOrderId, 'order-A');
+
+  // A second redemption (e.g. a racing checkout) loses and changes nothing.
+  assert.equal(coupons.redeem('ONCE', 'order-B'), false);
+  assert.equal(coupons.get('ONCE')!.redeemedByOrderId, 'order-A'); // not overwritten
+
+  // Unknown coupon redeems nothing.
+  assert.equal(coupons.redeem('nope', 'order-C'), false);
+});

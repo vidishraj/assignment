@@ -41,6 +41,15 @@ export interface CouponRepository {
   get(code: string): Coupon | undefined;
   list(): Coupon[];
   save(coupon: Coupon): void;
+  /**
+   * Atomically mark a coupon REDEEMED iff it is currently AVAILABLE; returns
+   * whether it won. This is the coupon analogue of `products.reserve` — it turns
+   * redemption from a read-then-write ACROSS statements into a single conditional
+   * write (`UPDATE … WHERE status = 'AVAILABLE'`, 0 rows ⇒ already redeemed), so
+   * single-use is atomic per statement and does not hinge on the surrounding
+   * transaction to win a cross-process race.
+   */
+  redeem(code: string, orderId: string): boolean;
 }
 
 export interface IdempotencyRepository {

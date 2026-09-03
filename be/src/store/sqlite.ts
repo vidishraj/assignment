@@ -184,6 +184,15 @@ export function createSqliteRepositories(filename = ':memory:'): Repositories {
         createdAt: coupon.createdAt,
       });
     },
+    redeem(code, orderId) {
+      const info = db
+        .prepare(
+          `UPDATE coupons SET status = 'REDEEMED', redeemed_by_order_id = ?
+           WHERE code = ? AND status = 'AVAILABLE'`,
+        )
+        .run(orderId, code);
+      return info.changes > 0;
+    },
   };
 
   const idempotency: IdempotencyRepository = {

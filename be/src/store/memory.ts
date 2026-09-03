@@ -73,6 +73,13 @@ class MemoryCouponRepository implements CouponRepository {
   save(coupon: Coupon) {
     this.byCode.set(coupon.code, coupon);
   }
+  redeem(code: string, orderId: string) {
+    const coupon = this.byCode.get(code);
+    if (!coupon || coupon.status !== 'AVAILABLE') return false;
+    coupon.status = 'REDEEMED';
+    coupon.redeemedByOrderId = orderId;
+    return true;
+  }
 }
 
 class MemoryIdempotencyRepository implements IdempotencyRepository {
