@@ -11,11 +11,13 @@ import { AppError } from './errors.js';
 import { makeCartService } from './services/cart-service.js';
 import { makeCheckoutService } from './services/checkout-service.js';
 import { makeCouponService } from './services/coupon-service.js';
+import { makeReportService } from './services/report-service.js';
 
 export function makeRouter(deps: AppDeps): Router {
   const carts = makeCartService(deps.repos);
   const checkout = makeCheckoutService(deps.repos);
   const coupons = makeCouponService(deps.repos, deps.config);
+  const reports = makeReportService(deps.repos);
   const router = Router();
 
   // --- catalogue (handy for evaluators to see stock) ---
@@ -65,6 +67,11 @@ export function makeRouter(deps: AppDeps): Router {
   // Mint a coupon for the next unrewarded milestone (409 if none is due).
   router.post('/admin/coupons', (_req, res) => {
     res.status(201).json(coupons.generate());
+  });
+
+  // Read-only reconciliation summary. Does not mutate; safe to call repeatedly.
+  router.get('/admin/report', (_req, res) => {
+    res.json(reports.report());
   });
 
   // --- orders ---
