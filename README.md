@@ -41,6 +41,8 @@ Configuration (injected, with defaults):
 | `PORT`               | HTTP port                                  | `3000`  |
 | `MILESTONE_INTERVAL` | `n` — a coupon is eligible every `n` orders | `5`     |
 | `DISCOUNT_PERCENT`   | `x` — coupon discount percent (0–100)      | `10`    |
+| `RATE_LIMIT`         | max mutating requests per window (`0` = off) | `120`   |
+| `RATE_WINDOW_MS`     | rate-limit window in ms                    | `60000` |
 
 ```bash
 MILESTONE_INTERVAL=3 DISCOUNT_PERCENT=10 npm run dev
@@ -99,6 +101,12 @@ and error code is at [`be/openapi.yaml`](be/openapi.yaml) (the `/admin` routes a
 tagged administrative). The prose below is the same contract in narrative form.
 
 Base URL `http://localhost:3000`. Request and response bodies are JSON.
+
+**Every request** gets an `X-Request-Id` (an inbound one is honoured, else minted),
+echoed on the response and included in every error body as `requestId`, and one
+structured JSON log line is emitted per request. **Mutating routes** (checkout, admin
+coupon generation) are rate limited (`RATE_LIMIT`/window) and return `429` with a
+`Retry-After` header when exceeded — see the limitations in `DECISIONS.md`.
 **Administrative** operations are the `/admin/*` routes (identified by prefix;
 auth is out of scope per the brief).
 
@@ -169,7 +177,8 @@ Checkout errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
 `couponCode`), `CART_NOT_FOUND` (404), `CART_EMPTY` (400),
 `INSUFFICIENT_INVENTORY` (409, with `{ productId, requested, available }`),
 `COUPON_INVALID` (400), `COUPON_ALREADY_REDEEMED` (409),
-`IDEMPOTENCY_KEY_REUSED` (422, same key reused for a different request).
+`IDEMPOTENCY_KEY_REUSED` (422, same key reused for a different request),
+`RATE_LIMITED` (429, with `Retry-After`).
 A checkout that fails validation changes nothing — inventory and any supplied
 coupon are left untouched.
 

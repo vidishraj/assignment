@@ -288,9 +288,10 @@ One `AppError { code, status, details }` → JSON `{ error: { code, message, det
 Stable codes include `VALIDATION_ERROR`, `MALFORMED_REQUEST`, `PAYLOAD_TOO_LARGE`,
 `PRODUCT_NOT_FOUND`, `INVALID_QUANTITY`, `QUANTITY_LIMIT_EXCEEDED`,
 `INSUFFICIENT_INVENTORY`, `CART_NOT_FOUND`, `CART_EMPTY`, `ITEM_NOT_IN_CART`,
-`CART_ALREADY_CHECKED_OUT`, `ORDER_NOT_FOUND`, `COUPON_INVALID`,
-`COUPON_ALREADY_REDEEMED`, `COUPON_NOT_ELIGIBLE`. Statuses are assigned once in a
-central map. Full list per endpoint is in the README.
+`CART_ALREADY_CHECKED_OUT`, `IDEMPOTENCY_KEY_REUSED`, `RATE_LIMITED`,
+`ORDER_NOT_FOUND`, `COUPON_INVALID`, `COUPON_ALREADY_REDEEMED`,
+`COUPON_NOT_ELIGIBLE`. Statuses are assigned once in a central map. Error bodies also
+carry the `requestId` for correlation. Full list per endpoint is in the README.
 
 **Error precedence.** Within a request, cheap field validation runs before
 existence/state checks, so on a request that is malformed *and* targets a missing
@@ -354,7 +355,27 @@ immutable orders, milestone coupon
 generation and single-use failure-safe redemption, admin report, a typed error
 model incl. malformed-body handling, the test suite above, an optional SQLite store
 behind the same repository interface (same suite green on both) with a multi-process
-contention proof, an OpenAPI 3.1 document, and a GitHub Actions CI pipeline.
+contention proof, request-id logging, a scoped rate limit, an OpenAPI 3.1 document,
+and a GitHub Actions CI pipeline.
+
+**Observability (request ids + structured logs).** Every request carries an id (an
+inbound `X-Request-Id` is honoured, else one is minted), echoed on the response and
+included in every error body, with one structured JSON line per request (id, method,
+path, status, duration, and the error *code* on failure — never the stack, never the
+request body, which is customer data). This is not decoration: the assignment is
+themed on *reliability*, and the first thing you need when a retry or a concurrent
+checkout misbehaves is to correlate the request with its log line. The log sink is
+injectable so tests assert on entries rather than spewing to stdout, and it stays
+synchronous (a `finish` callback, no `await`).
+
+**Rate limit (named limitations).** A small in-memory fixed-window limiter guards
+the mutating routes (checkout, admin coupon generation), returning `429` with
+`Retry-After`. Its limits are the honest part: with no auth model there is **no
+principal to key on, so it keys on IP** — trivially shared behind a proxy or spoofed,
+and it would be a per-account limit in production; and being **in-process it does not
+hold across instances** (each node has its own window). It is a coarse abuse-dampener,
+not a production control, and it is disabled by default in the test config so the
+concurrency tests aren't throttled.
 
 **Deferred, on purpose:**
 - **Frontend** — the brief marks it optional and says it "will not compensate for an
@@ -383,7 +404,8 @@ contention proof, an OpenAPI 3.1 document, and a GitHub Actions CI pipeline.
   the coupon then needs a **`RESERVED`** state in addition to `AVAILABLE`/`REDEEMED`,
   because it is held across the await and must not be spendable by another checkout
   in the meantime.
-- **Rate limiting / observability / pagination** — out of scope for the timebox.
+- **Pagination** — the list endpoints (`/products`, orders) return everything; a
+  real catalogue/report would page. Out of scope for the timebox.
 
 **Dependency posture.** A fresh `npm ci` flagged 3 moderate advisories in `qs`
 (array-limit bypass + DoS), reached transitively through `express → body-parser`.

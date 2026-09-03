@@ -222,6 +222,11 @@ paths:
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: 'RATE_LIMITED — includes a Retry-After header'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
   /orders/{id}:
     get:
       tags: [orders]
@@ -254,6 +259,11 @@ paths:
               schema: { $ref: '#/components/schemas/Coupon' }
         '409':
           description: 'COUPON_NOT_ELIGIBLE (no unrewarded milestone reached)'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '429':
+          description: 'RATE_LIMITED — includes a Retry-After header'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -387,6 +397,7 @@ components:
                 - ITEM_NOT_IN_CART
                 - CART_ALREADY_CHECKED_OUT
                 - IDEMPOTENCY_KEY_REUSED
+                - RATE_LIMITED
                 - ORDER_NOT_FOUND
                 - COUPON_INVALID
                 - COUPON_ALREADY_REDEEMED
@@ -394,3 +405,4 @@ components:
                 - INTERNAL
             message: { type: string }
             details: { type: object, additionalProperties: true }
+            requestId: { type: string, description: correlates with the X-Request-Id header and the request log line }
