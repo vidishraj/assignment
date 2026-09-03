@@ -4,8 +4,11 @@ Design record for the **Reliable Checkout & Rewards Service** (the `be/` track).
 The governing brief is [`be/README.md`](be/README.md); the root brief that used to
 live here was an older, softer version and does not describe this assignment.
 
-Approximate time spent: **~5 hours**, within the 4–6h timebox. Where I stopped
-short of production hardening I say so explicitly below rather than leave a silent gap.
+Approximate time spent: **~2–2.5 hours** wall clock (git history runs 06:45 → 08:40,
+with a ~1h gap during a review cycle). That figure reflects how the work was
+produced — a multi-agent pipeline I built and direct, not solo hand-coding — which I
+disclose in full under *How I used AI tools* below. Where I stopped short of
+production hardening I say so explicitly rather than leave a silent gap.
 
 ---
 
@@ -355,9 +358,16 @@ is a store swap, not a rewrite.
 
 ## How I used AI tools
 
-I used an AI coding assistant throughout to scaffold the TypeScript/Express project,
-draft the services, and write tests, reviewing every line before committing. The
-useful account is not "AI wrote code"; it is where I **did not trust** it.
+**How this was produced.** I built and directed a small multi-agent pipeline rather
+than hand-coding solo: an **implementer** that writes the code and tests, an
+**independent reviewer** that does not commit and only critiques, and a
+**verification layer** that reproduces every claim against a running server before
+it is accepted. The ~2h wall-clock figure reflects that parallelism, not a claim
+about typing speed. I own every line and every decision here; the value I add is the
+adversarial input, the judgment about which fix is defensible, and the wiring of a
+process that tries to catch its own mistakes. The two stories below are that process
+working — once by catching a defect, and more tellingly once by catching its own
+blind spot.
 
 **A real correction — the unbounded-quantity defect.** The cart code validated that
 a quantity was a positive integer, and its tests were green. It looked correct. It
@@ -375,6 +385,21 @@ and is far weaker to defend in an interview than "a cart line holds at most 1000
 units." The lesson I take from this build: generated code and its generated tests
 tend to share the same blind spots, so the value I add is the adversarial input and
 the judgment about *which* fix is defensible — not the typing.
+
+**A real miss — malformed bodies returned 500.** This one is the more honest story
+because the process got it *wrong* first. The verification layer probed the coupon
+field with a number, an object, an array, and a boolean, got clean `400`s every
+time, and concluded input handling was sound. It wasn't — those were all
+**well-formed JSON with wrong types**, which reach the route validator. A
+**malformed** body (`{"bad"`, a bare string, an oversized payload) dies inside
+body-parser *before* the router ever runs, so it fell straight through to the `500`
+fallback. The probe never tested that layer, so it never saw it. The **independent
+reviewer** — reproducing against a live server rather than trusting the probe's
+conclusion — hit it in the first minute, and it became commit `781a3e4` (map those
+to `400 MALFORMED_REQUEST` / `413 PAYLOAD_TOO_LARGE`). I keep this in the write-up
+deliberately: it is direct evidence that a single verifier reasons at one layer and
+misses others, which is exactly why an independent reviewer that reproduces claims —
+rather than a self-check that trusts them — is worth building. The miss is the point.
 
 ---
 
