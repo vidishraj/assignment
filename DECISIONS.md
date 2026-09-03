@@ -383,6 +383,24 @@ repository interface stands in for:
 Because the services depend on the repository interfaces and not on the Maps, this
 is a store swap, not a rewrite.
 
+**This is demonstrated, not just asserted.** There is a second store,
+`src/store/sqlite.ts` (better-sqlite3, an *optional* dependency), that implements the
+same four interfaces over real tables with the `UNIQUE(orders.cart_id)` and
+`UNIQUE(coupons.milestone)` constraints above. The checkout critical section runs
+inside a real `BEGIN IMMEDIATE` transaction, and inventory is taken with the
+conditional decrement (`… WHERE inventory >= :qty`, 0 rows ⇒ `INSUFFICIENT_INVENTORY`)
+— the same primitive the bullets describe. `npm run test:sqlite` runs the **same**
+27-test suite against SQLite and it passes; the memory and SQLite stores share one
+suite, one service layer, one set of invariants. Be precise about what this proves
+and what it doesn't: it proves the **seam is real** and the **transaction shape is
+correct** (the documented SQL is executable, not aspirational). It does **not** prove
+multi-process contention, because the tests still run in one process against an
+in-memory database — genuine cross-instance correctness rests on the database's own
+locking (`BEGIN IMMEDIATE` / `SELECT … FOR UPDATE`), which is where I'd take it next.
+better-sqlite3 is optional and loaded lazily, so a machine that can't build the
+native module still gets a green `npm ci` and default `npm test`; the SQLite suite
+skips with a clear message.
+
 ---
 
 ## How I used AI tools

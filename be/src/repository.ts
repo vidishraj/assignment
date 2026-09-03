@@ -13,6 +13,15 @@ export interface ProductRepository {
   get(id: string): Product | undefined;
   list(): Product[];
   save(product: Product): void;
+  /**
+   * Atomically decrement inventory iff at least `quantity` is in stock; returns
+   * whether it succeeded. This is the conditional-decrement primitive the
+   * multi-instance design relies on: in SQL it is
+   * `UPDATE products SET inventory = inventory - :q WHERE id = :id AND inventory >= :q`
+   * with "0 rows affected" meaning insufficient stock. In memory it is the same
+   * check-and-decrement, made atomic by the single-threaded event loop.
+   */
+  reserve(productId: string, quantity: number): boolean;
 }
 
 export interface CartRepository {
@@ -39,4 +48,13 @@ export interface Repositories {
   carts: CartRepository;
   orders: OrderRepository;
   coupons: CouponRepository;
+  /**
+   * Run `fn` as one atomic unit. For the in-memory store this just calls `fn`
+   * (a synchronous function is already atomic under Node's event loop). For a
+   * real database it is a transaction — the SQLite store runs it inside
+   * `BEGIN IMMEDIATE … COMMIT`, rolling back if `fn` throws. `fn` must stay
+   * synchronous (no `await`), which is what keeps the checkout critical section
+   * atomic in both stores.
+   */
+  transaction<T>(fn: () => T): T;
 }

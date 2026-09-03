@@ -33,7 +33,14 @@ import { AppError } from '../errors.js';
 import type { Repositories } from '../repository.js';
 
 export function makeCheckoutService(repos: Repositories) {
+  // The whole critical section runs inside one transaction: a no-op wrapper for
+  // the in-memory store (the event loop already serialises it) and a real
+  // BEGIN IMMEDIATE for SQLite. `runCheckout` stays synchronous so both hold.
   function checkout(cartId: string, couponCode?: string): Order {
+    return repos.transaction(() => runCheckout(cartId, couponCode));
+  }
+
+  function runCheckout(cartId: string, couponCode?: string): Order {
     const cart = repos.carts.get(cartId);
     if (!cart) throw new AppError('CART_NOT_FOUND', `no cart ${cartId}`, { cartId });
 
@@ -98,11 +105,16 @@ export function makeCheckoutService(repos: Repositories) {
     const subtotalCents = sumCents(lines.map((l) => l.lineTotalCents));
     const discountCents = coupon ? percentDiscount(subtotalCents, coupon.discountPercent) : 0;
 
-    // 2) Reserve inventory (all items validated above → safe to commit all).
+    // 2) Reserve inventory via the conditional-decrement primitive
+    //    (`… WHERE inventory >= qty`). Validation above guarantees success, so the
+    //    guard is defensive — but under a real database it is exactly the line
+    //    that turns a lost concurrent race into a clean rejection.
     for (const item of cart.items) {
-      const product = repos.products.get(item.productId)!;
-      product.inventory -= item.quantity;
-      repos.products.save(product);
+      if (!repos.products.reserve(item.productId, item.quantity)) {
+        throw new AppError('INSUFFICIENT_INVENTORY', `insufficient inventory for ${item.productId}`, {
+          productId: item.productId,
+        });
+      }
     }
 
     // 3) Redeem the coupon, if one was supplied (validated AVAILABLE above).

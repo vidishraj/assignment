@@ -6,11 +6,22 @@ import type { AddressInfo } from 'node:net';
 import type { Server } from 'node:http';
 import { createApp, type AppDeps } from './app.js';
 import type { AppConfig } from './config.js';
+import type { Repositories } from './repository.js';
 import { seedProducts } from './seed.js';
 import { createMemoryRepositories } from './store/memory.js';
+import { createSqliteRepositories } from './store/sqlite.js';
+
+/**
+ * Pick the store from STORE (default memory). `npm run test:sqlite` sets
+ * STORE=sqlite and runs the SAME suite against the SQLite store — the value is
+ * that one suite passes against both, not two parallel suites.
+ */
+function makeRepositories(): Repositories {
+  return process.env.STORE === 'sqlite' ? createSqliteRepositories() : createMemoryRepositories();
+}
 
 export function buildDeps(config: Partial<AppConfig> = {}): AppDeps {
-  const repos = createMemoryRepositories();
+  const repos = makeRepositories();
   seedProducts(repos.products);
   return { config: { milestoneInterval: 3, discountPercent: 10, ...config }, repos };
 }

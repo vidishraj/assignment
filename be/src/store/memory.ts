@@ -27,6 +27,12 @@ class MemoryProductRepository implements ProductRepository {
   save(product: Product) {
     this.byId.set(product.id, product);
   }
+  reserve(productId: string, quantity: number) {
+    const product = this.byId.get(productId);
+    if (!product || product.inventory < quantity) return false;
+    product.inventory -= quantity;
+    return true;
+  }
 }
 
 class MemoryCartRepository implements CartRepository {
@@ -74,5 +80,11 @@ export function createMemoryRepositories(): Repositories {
     carts: new MemoryCartRepository(),
     orders: new MemoryOrderRepository(),
     coupons: new MemoryCouponRepository(),
+    // A synchronous function is already atomic under the event loop, so the
+    // in-memory "transaction" is just running it. (The SQLite store wraps this
+    // in BEGIN IMMEDIATE — same call site, real transactional semantics there.)
+    transaction<T>(fn: () => T): T {
+      return fn();
+    },
   };
 }

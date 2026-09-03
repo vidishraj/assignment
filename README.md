@@ -58,6 +58,13 @@ exercises **competing and repeated** operations (concurrent oversell, conservati
 concurrent retries, coupon failure-safety, concurrent redemption, concurrent
 generation). See the *Testing strategy* section of `DECISIONS.md`.
 
+**Same suite, two stores.** The default store is in-memory (dependency-free). An
+optional SQLite store (`src/store/sqlite.ts`, via `better-sqlite3`) implements the
+same repository interfaces; `npm run test:sqlite` runs the **same** suite against it
+inside a real `BEGIN IMMEDIATE` transaction. `better-sqlite3` is an *optional* native
+dependency — if it isn't installed, `test:sqlite` skips cleanly and the default
+`npm test` and `npm ci` are unaffected.
+
 ## Seed data
 
 Six products are seeded on startup, including deliberately scarce stock so
