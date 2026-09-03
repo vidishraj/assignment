@@ -26,31 +26,31 @@ import type {
 } from '../repository.js';
 
 const SCHEMA = `
-CREATE TABLE products (
+CREATE TABLE IF NOT EXISTS products (
   id TEXT PRIMARY KEY, name TEXT NOT NULL, unit_price_cents INTEGER NOT NULL, inventory INTEGER NOT NULL
 );
-CREATE TABLE carts (
+CREATE TABLE IF NOT EXISTS carts (
   id TEXT PRIMARY KEY, status TEXT NOT NULL, created_at TEXT NOT NULL, order_id TEXT
 );
-CREATE TABLE cart_items (
+CREATE TABLE IF NOT EXISTS cart_items (
   cart_id TEXT NOT NULL, product_id TEXT NOT NULL, quantity INTEGER NOT NULL,
   PRIMARY KEY (cart_id, product_id)
 );
-CREATE TABLE orders (
+CREATE TABLE IF NOT EXISTS orders (
   id TEXT PRIMARY KEY, cart_id TEXT NOT NULL UNIQUE, status TEXT NOT NULL,
   subtotal_cents INTEGER NOT NULL, discount_cents INTEGER NOT NULL, total_cents INTEGER NOT NULL,
   coupon_code TEXT, created_at TEXT NOT NULL
 );
-CREATE TABLE order_lines (
+CREATE TABLE IF NOT EXISTS order_lines (
   order_id TEXT NOT NULL, seq INTEGER NOT NULL, product_id TEXT NOT NULL, product_name TEXT NOT NULL,
   unit_price_cents INTEGER NOT NULL, quantity INTEGER NOT NULL, line_total_cents INTEGER NOT NULL,
   PRIMARY KEY (order_id, seq)
 );
-CREATE TABLE coupons (
+CREATE TABLE IF NOT EXISTS coupons (
   code TEXT PRIMARY KEY, discount_percent INTEGER NOT NULL, milestone INTEGER NOT NULL UNIQUE,
   status TEXT NOT NULL, redeemed_by_order_id TEXT, created_at TEXT NOT NULL
 );
-CREATE TABLE idempotency_keys (
+CREATE TABLE IF NOT EXISTS idempotency_keys (
   key TEXT PRIMARY KEY, order_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL,
   http_status INTEGER NOT NULL, created_at TEXT NOT NULL
 );
@@ -67,6 +67,12 @@ export function createSqliteRepositories(filename = ':memory:'): Repositories {
   const Database = require('better-sqlite3') as new (f: string) => SqliteDb;
   const db = new Database(filename);
   db.pragma('foreign_keys = ON');
+  // For a shared FILE database under multi-process contention: WAL lets readers
+  // and one writer proceed concurrently, and busy_timeout makes a writer that
+  // meets BEGIN IMMEDIATE's lock WAIT (up to 5s) rather than fail instantly with
+  // SQLITE_BUSY. Both are no-ops/ignored for an in-memory database.
+  db.pragma('journal_mode = WAL');
+  db.pragma('busy_timeout = 5000');
   db.exec(SCHEMA);
 
   const products: ProductRepository = {

@@ -20,4 +20,5 @@ jobs:
       - run: npm run build
       - run: npm test
       - run: npm run test:sqlite
+      - run: npm run test:contention
       - run: npm audit --audit-level=moderate

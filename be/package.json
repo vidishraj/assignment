@@ -13,7 +13,8 @@
     "start": "node dist/index.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "node --import tsx --test $(find src -name '*.test.ts')",
-    "test:sqlite": "node scripts/test-sqlite.mjs"
+    "test:sqlite": "node scripts/test-sqlite.mjs",
+    "test:contention": "node --import tsx scripts/multiprocess-contention.ts"
   },
   "dependencies": {
     "express": "^4.19.2"
