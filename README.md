@@ -114,7 +114,11 @@ Cart view shape:
 }
 ```
 
-Cart errors: `CART_NOT_FOUND` (404), `PRODUCT_NOT_FOUND` (404),
+`orderId` is added to this shape once the cart is `CHECKED_OUT` (it links to the
+placed order — this is how a client recovers its order after a lost response).
+
+Cart errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
+`productId`), `CART_NOT_FOUND` (404), `PRODUCT_NOT_FOUND` (404),
 `INVALID_QUANTITY` (400, non-positive / non-integer),
 `QUANTITY_LIMIT_EXCEEDED` (422, accumulated quantity > 1000),
 `ITEM_NOT_IN_CART` (404), `CART_ALREADY_CHECKED_OUT` (409, mutating a placed cart).
@@ -135,7 +139,8 @@ Cart errors: `CART_NOT_FOUND` (404), `PRODUCT_NOT_FOUND` (404),
 }
 ```
 
-Checkout errors: `CART_NOT_FOUND` (404), `CART_EMPTY` (400),
+Checkout errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
+`couponCode`), `CART_NOT_FOUND` (404), `CART_EMPTY` (400),
 `INSUFFICIENT_INVENTORY` (409, with `{ productId, requested, available }`),
 `COUPON_INVALID` (400), `COUPON_ALREADY_REDEEMED` (409).
 A checkout that fails validation changes nothing — inventory and any supplied

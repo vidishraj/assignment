@@ -67,6 +67,18 @@ an interviewer can probe, so I name the trade-off honestly.
   code. That is an accepted consequence of the brief not specifying ownership. With
   a customer model I would bind a coupon to an account and make codes opaque.
 
+- **Coupon expiry.** The brief does not specify a coupon lifetime, so I chose the
+  simplest defensible rule: **coupons never expire** — once minted, a coupon stays
+  `AVAILABLE` until it is redeemed. A production rewards program would add a
+  `expiresAt` and reject an expired coupon at checkout (alongside the existing
+  `AVAILABLE` check); the redemption path is already the right place to enforce it.
+
+- **Coupon stacking.** Checkout accepts a single optional `couponCode`, so **at most
+  one coupon applies per order** — no stacking. This keeps the discount calculation
+  a single deterministic step and avoids ordering questions (does 10% then 10%
+  compound or add?). Multiple coupons would need an explicit, documented combination
+  rule; I deliberately did not open that door.
+
 - **Price change between add and checkout.** A cart stores product references and
   quantities, **not** frozen prices. Totals are computed live from the current
   catalogue when the cart is viewed, and are frozen only into the order snapshot at
@@ -272,7 +284,7 @@ happy paths, the suite exercises:
 - **Concurrent redemption** — two carts, one coupon → exactly one redeems.
 - **Concurrent generation** — many admin requests at one milestone → one coupon.
 - **Malformed/oversized bodies** → `400` / `413`, never `500`.
-- **Report is a pure projection** — two calls are byte-identical.
+- **Report is a pure projection** — two successive calls are deep-equal.
 
 **Mutation check (guarding against vacuous tests):** the brief warns that a test
 that passes on both correct and broken code is worse than none. I verified the key
@@ -326,8 +338,8 @@ repository interface stands in for:
 - **Order-per-cart idempotency:** a `UNIQUE` constraint on `orders.cart_id` (and/or
   an `idempotency_key` column with a unique index) so a duplicate checkout fails the
   insert and is translated back to "return the existing order."
-- **One coupon per milestone:** a **unique partial index** on the coupon milestone so
-  two admins racing to generate cannot both insert.
+- **One coupon per milestone:** a **`UNIQUE(milestone)` constraint** on the coupon
+  table so two admins racing to generate cannot both insert.
 - **Single-use redemption:** redeem with
   `UPDATE coupons SET status='REDEEMED', redeemed_by_order_id=:id WHERE code=:code AND status='AVAILABLE' RETURNING *`
   — the `WHERE status='AVAILABLE'` makes the race a single-winner at the database,
