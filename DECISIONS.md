@@ -302,6 +302,15 @@ model incl. malformed-body handling, and the test suite above.
   charged, exactly like an inventory failure).
 - **Rate limiting / observability / pagination** — out of scope for the timebox.
 
+**Dependency posture.** A fresh `npm ci` flagged 3 moderate advisories in `qs`
+(array-limit bypass + DoS), reached transitively through `express → body-parser`.
+`npm audit fix` is a no-op here because Express 4 pins `qs: ~6.15.1`, which cannot
+resolve to the patched `6.16.0`, so there is no in-range upgrade. Rather than
+migrate to Express 5 to move the range (disproportionate inside the timebox), I
+pinned the fix with an npm `overrides` entry (`"qs": "^6.16.0"`); `npm audit` then
+reports 0 vulnerabilities with the suite still green. If this were a longer-lived
+service I would schedule the Express 5 migration instead of relying on an override.
+
 ---
 
 ## How the design evolves for multiple instances + a production database
