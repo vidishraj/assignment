@@ -4,8 +4,8 @@ Design record for the **Reliable Checkout & Rewards Service** (the `be/` track).
 The governing brief is [`be/README.md`](be/README.md); the root brief that used to
 live here was an older, softer version and does not describe this assignment.
 
-Approximate time spent: **~3.5 hours** wall clock (git history runs 06:45 → 10:09,
-including review-and-revision cycles). That figure reflects how the work was
+Approximate time spent: **~3.5 hours** wall clock across the git history (including
+review-and-revision cycles). That figure reflects how the work was
 produced — a multi-agent pipeline I built and direct, not solo hand-coding — which I
 disclose in full under *How I used AI tools* below. Where I stopped short of
 production hardening I say so explicitly rather than leave a silent gap.
@@ -300,6 +300,9 @@ happy paths, the suite exercises:
   `AVAILABLE` and is redeemable afterwards.
 - **Concurrent redemption** — two carts, one coupon → exactly one redeems.
 - **Concurrent generation** — many admin requests at one milestone → one coupon.
+- **`reserve()` at the store level** — the conditional decrement returns false and
+  does not mutate when stock is insufficient (pins the no-oversell primitive
+  directly, against both stores).
 - **Malformed/oversized bodies** → `400` / `413`, never `500`.
 - **Report is a pure projection** — two successive calls are deep-equal.
 - **Randomised interleavings** — a fixed-seed property test runs 12 rounds of a
@@ -311,13 +314,18 @@ happy paths, the suite exercises:
 **Mutation check (guarding against vacuous tests):** the brief warns that a test
 that passes on both correct and broken code is worse than none. I verified the key
 tests actually fail when the implementation is wrong by temporarily breaking it (all
-reverted): disabling cart idempotency turned 2 tests red; disabling the coupon
-single-use guard turned 3 red. Inventory has **two independent guards** — the
-validate-first check and the conditional-decrement `reserve()` — so breaking *either
-one alone* turns 0 red (the other still catches the oversell); breaking *both*
-turns 5 red (atomic-rejection, oversell, conservation, coupon-failure-safety, and the
-randomised property test). That defense-in-depth is deliberate, and the mutation
-numbers are exact at the current commit.
+reverted; numbers exact at the current commit): disabling cart idempotency turned 2
+tests red; disabling the coupon single-use guard turned 3 red. Checkout guards
+inventory in **two places that pin different invariants** (not redundant copies of
+one): the **validate-first** check pins *all-or-nothing atomicity* — breaking it
+alone turns 2 red (the atomic-rejection test and the randomised property test, which
+earned its keep by catching this), because `reserve()` still blocks the oversell but
+a multi-line cart can now partially reserve before failing. The **`reserve()`**
+conditional decrement pins *no-oversell* — breaking it alone turns 1 red (a direct
+store-level test that `reserve()` returns false and does not mutate when stock is
+insufficient), because validate-first still blocks the oversell at the HTTP layer but
+the primitive itself is now unguarded. Breaking both turns 6 red. Each guard is
+independently pinned.
 
 ---
 
