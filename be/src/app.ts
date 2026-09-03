@@ -2,6 +2,7 @@ import express, { type Express } from 'express';
 import type { AppConfig } from './config.js';
 import type { Repositories } from './repository.js';
 import { errorHandler } from './errors.js';
+import { makeRouter } from './routes.js';
 
 /**
  * Dependencies an app instance needs. Passing them in (rather than importing a
@@ -23,7 +24,7 @@ export function createApp(deps: AppDeps): Express {
     res.json({ status: 'ok', config: deps.config });
   });
 
-  // Routers (carts, checkout, …) are registered here as they are built.
+  app.use(makeRouter(deps));
 
   // Must be last: turns thrown AppErrors into typed JSON responses.
   app.use(errorHandler);
