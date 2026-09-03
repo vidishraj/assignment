@@ -72,7 +72,6 @@ export interface IdempotencyRecord {
   key: string;
   orderId: string;
   requestFingerprint: string;
-  httpStatus: number;
   createdAt: string;
 }
 

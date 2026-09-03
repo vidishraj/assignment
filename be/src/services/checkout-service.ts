@@ -67,7 +67,9 @@ export function makeCheckoutService(repos: Repositories) {
             );
           }
           const order = repos.orders.get(seen.orderId);
-          if (order) return { order, status: seen.httpStatus };
+          // A replay creates nothing, so it is 200 (not 201) — the same answer the
+          // cart layer gives, so both idempotency layers tell one story.
+          if (order) return { order, status: 200 };
           // Record without a live order shouldn't happen; fall through to re-run.
         }
         const outcome = runCheckout(cartId, couponCode);
@@ -75,7 +77,6 @@ export function makeCheckoutService(repos: Repositories) {
           key: idempotencyKey,
           orderId: outcome.order.id,
           requestFingerprint: fp,
-          httpStatus: outcome.status,
           createdAt: new Date().toISOString(),
         });
         return outcome;

@@ -52,7 +52,7 @@ CREATE TABLE IF NOT EXISTS coupons (
 );
 CREATE TABLE IF NOT EXISTS idempotency_keys (
   key TEXT PRIMARY KEY, order_id TEXT NOT NULL, request_fingerprint TEXT NOT NULL,
-  http_status INTEGER NOT NULL, created_at TEXT NOT NULL
+  created_at TEXT NOT NULL
 );
 `;
 
@@ -203,14 +203,13 @@ export function createSqliteRepositories(filename = ':memory:'): Repositories {
         key: row.key,
         orderId: row.order_id,
         requestFingerprint: row.request_fingerprint,
-        httpStatus: row.http_status,
         createdAt: row.created_at,
       };
     },
     save(record) {
       db.prepare(
-        `INSERT INTO idempotency_keys (key, order_id, request_fingerprint, http_status, created_at)
-         VALUES (@key, @orderId, @requestFingerprint, @httpStatus, @createdAt)`,
+        `INSERT INTO idempotency_keys (key, order_id, request_fingerprint, created_at)
+         VALUES (@key, @orderId, @requestFingerprint, @createdAt)`,
       ).run(record);
     },
   };

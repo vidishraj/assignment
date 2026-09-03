@@ -31,9 +31,9 @@ test('same Idempotency-Key replays the same order, charged once', async () => {
     const cartId = await cartWith(server.baseUrl, 'p-cap', 1); // inv 20
     const first = await checkout(server.baseUrl, cartId, 'key-1');
     const replay = await checkout(server.baseUrl, cartId, 'key-1');
-    assert.equal(first.status, 201);
-    assert.deepEqual(replay.body, first.body); // identical response
-    assert.equal(replay.status, first.status); // identical status
+    assert.equal(first.status, 201); // created
+    assert.equal(replay.status, 200); // a replay creates nothing (same as the cart layer)
+    assert.deepEqual(replay.body, first.body); // same order body
     assert.equal(deps.repos.products.get('p-cap')!.inventory, 19); // charged once
   } finally {
     await server.close();
@@ -94,6 +94,12 @@ test('concurrent requests with the same key yield exactly one order', async () =
     const results = await Promise.all(
       Array.from({ length: 6 }, () => checkout(server.baseUrl, cartId, 'key-race')),
     );
+    // Each request must have SUCCEEDED with a real order id before collapsing to a
+    // Set — otherwise a Set of `undefined`s is size 1 and this passes vacuously.
+    for (const r of results) {
+      assert.ok(r.status === 200 || r.status === 201, `expected 2xx, got ${r.status}`);
+      assert.ok(typeof r.body.id === 'string' && r.body.id.length > 0, 'each request returns an order id');
+    }
     const orderIds = new Set(results.map((r) => r.body.id));
     assert.equal(orderIds.size, 1, 'all same-key requests resolve to one order');
     assert.equal(deps.repos.orders.count(), 1);
