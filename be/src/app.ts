@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import type { AppConfig } from './config.js';
+import type { Repositories } from './repository.js';
 import { errorHandler } from './errors.js';
 
 /**
@@ -10,6 +11,7 @@ import { errorHandler } from './errors.js';
  */
 export interface AppDeps {
   config: AppConfig;
+  repos: Repositories;
 }
 
 /** Build an Express app. No side effects (no listen) so tests can drive it. */
