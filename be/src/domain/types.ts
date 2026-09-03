@@ -67,7 +67,8 @@ export interface Coupon {
   discountPercent: number;
   /**
    * The order milestone this coupon rewards (e.g. the 5th order → milestone 5).
-   * At most one coupon per milestone, enforced by the coupon service later.
+   * At most one coupon exists per milestone: the coupon service only mints when
+   * the number of reached milestones exceeds the number already generated.
    */
   milestone: number;
   status: CouponStatus;

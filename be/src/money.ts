@@ -45,10 +45,3 @@ export function percentDiscount(subtotalCents: Cents, percent: number): Cents {
   const raw = Math.floor((subtotalCents * percent + 50) / 100);
   return Math.min(subtotalCents, raw);
 }
-
-/** Render cents as a human-readable decimal string (for API/debug output). */
-export function formatCents(cents: Cents): string {
-  const sign = cents < 0 ? '-' : '';
-  const abs = Math.abs(cents);
-  return `${sign}${Math.floor(abs / 100)}.${String(abs % 100).padStart(2, '0')}`;
-}

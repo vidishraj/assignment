@@ -66,9 +66,6 @@ class MemoryCouponRepository implements CouponRepository {
   save(coupon: Coupon) {
     this.byCode.set(coupon.code, coupon);
   }
-  findByMilestone(milestone: number) {
-    return [...this.byCode.values()].find((c) => c.milestone === milestone);
-  }
 }
 
 export function createMemoryRepositories(): Repositories {

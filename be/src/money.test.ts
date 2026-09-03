@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { assertCents, formatCents, lineTotal, percentDiscount, sumCents } from './money.js';
+import { assertCents, lineTotal, percentDiscount, sumCents } from './money.js';
 
 test('lineTotal and sumCents stay exact in integer cents', () => {
   // Three items at 33 cents = 99, not 0.9899999… as floats might drift.
@@ -26,10 +26,4 @@ test('assertCents rejects floats and negatives', () => {
   assert.equal(assertCents(500), 500);
   assert.throws(() => assertCents(5.5), /non-negative integer/);
   assert.throws(() => assertCents(-1), /non-negative integer/);
-});
-
-test('formatCents renders cents as a decimal string', () => {
-  assert.equal(formatCents(1999), '19.99');
-  assert.equal(formatCents(5), '0.05');
-  assert.equal(formatCents(0), '0.00');
 });

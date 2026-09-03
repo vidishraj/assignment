@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import type { AppConfig } from './config.js';
+import { validateConfig } from './config.js';
 import type { Repositories } from './repository.js';
 import { errorHandler } from './errors.js';
 import { makeRouter } from './routes.js';
@@ -17,6 +18,10 @@ export interface AppDeps {
 
 /** Build an Express app. No side effects (no listen) so tests can drive it. */
 export function createApp(deps: AppDeps): Express {
+  // Fail fast on a bad config (e.g. discountPercent 150) at construction rather
+  // than minting an invalid coupon and 500-ing later at checkout.
+  validateConfig(deps.config);
+
   const app = express();
   app.use(express.json());
 

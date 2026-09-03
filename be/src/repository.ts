@@ -32,8 +32,6 @@ export interface CouponRepository {
   get(code: string): Coupon | undefined;
   list(): Coupon[];
   save(coupon: Coupon): void;
-  /** The coupon minted for a given order milestone, if any (≤ 1 per milestone). */
-  findByMilestone(milestone: number): Coupon | undefined;
 }
 
 export interface Repositories {
