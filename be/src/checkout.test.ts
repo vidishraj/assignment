@@ -126,6 +126,33 @@ test('concurrent checkouts for scarce stock never oversell', async () => {
   }
 });
 
+test('concurrent single-unit checkouts conserve inventory (sold + remaining == initial)', async () => {
+  const deps = buildDeps();
+  const server = await startServer(deps);
+  try {
+    // Far more competing carts than there is stock: 15 carts, 3 stickers.
+    const initial = deps.repos.products.get('p-sticker')!.inventory; // 3
+    const cartIds = await Promise.all(
+      Array.from({ length: 15 }, () => cartWith(server.baseUrl, 'p-sticker', 1)),
+    );
+    const results = await Promise.all(
+      cartIds.map((id) =>
+        api<Order | { error: { code: string } }>(server.baseUrl, 'POST', `/carts/${id}/checkout`),
+      ),
+    );
+    const placed = results.filter((r) => r.status === 201).length;
+    const remaining = deps.repos.products.get('p-sticker')!.inventory;
+    // Conservation is strictly stronger than "exactly one succeeded": every unit
+    // is accounted for, none created or lost, and inventory never went negative.
+    assert.equal(placed, initial, 'sold exactly the available stock, no oversell');
+    assert.equal(remaining, 0, 'stock fully drained');
+    assert.equal(placed + remaining, initial, 'sold + remaining == initial');
+    assert.ok(remaining >= 0, 'inventory never negative');
+  } finally {
+    await server.close();
+  }
+});
+
 test('concurrent retries of one cart yield a single order', async () => {
   const deps = buildDeps();
   const server = await startServer(deps);
