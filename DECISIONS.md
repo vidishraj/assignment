@@ -251,6 +251,13 @@ the boundary. The number is a policy knob, not a constant of the universe.
   redemption and one `COUPON_ALREADY_REDEEMED`.
 - **Idempotency:** cart status. First checkout: `201` + new order. Retry: `200` +
   the same order, no new inventory movement.
+- **A coupling worth naming:** checkout validates inventory *per cart line* and
+  assumes each product appears at most once in a cart. That invariant is not enforced
+  in checkout — it is owned by the cart service, where `addItem` **accumulates** onto
+  an existing line instead of appending a duplicate. If that behaviour ever changed
+  (two lines for the same product), each line's check could individually pass while
+  their sum oversells. The correct fix would be to validate on the summed quantity
+  per product; I note the dependency here rather than leave it implicit.
 
 ## Money and rounding rules
 
@@ -267,6 +274,13 @@ Stable codes include `VALIDATION_ERROR`, `MALFORMED_REQUEST`, `PAYLOAD_TOO_LARGE
 `CART_ALREADY_CHECKED_OUT`, `ORDER_NOT_FOUND`, `COUPON_INVALID`,
 `COUPON_ALREADY_REDEEMED`, `COUPON_NOT_ELIGIBLE`. Statuses are assigned once in a
 central map. Full list per endpoint is in the README.
+
+**Error precedence.** Within a request, cheap field validation runs before
+existence/state checks, so on a request that is malformed *and* targets a missing
+resource the client sees the `VALIDATION_ERROR` first, not `CART_NOT_FOUND`. This is
+a deliberate, consistent ordering (validate the request shape, then resolve
+entities, then check business state) rather than an accident; it just means the
+first failure reported is the earliest in that chain.
 
 ---
 
@@ -312,9 +326,24 @@ model incl. malformed-body handling, and the test suite above.
   brief; the interface is the seam for a real DB (below).
 - **AuthN/AuthZ** — not required. Admin routes are identified by their `/admin`
   prefix; there is no enforcement.
-- **Payment** — successful checkout *is* payment success. A payment step would slot
-  in as a validation before the mutation phase (a decline aborts with nothing
-  charged, exactly like an inventory failure).
+- **Payment** — successful checkout *is* payment success; there is no gateway. It is
+  worth being precise about how a real one would integrate, because it is the point
+  where this design's central claim is most easily broken. A **fake, synchronous**
+  payment would indeed slot in as one more validation before the mutation phase. A
+  **real gateway is a network call**, and the moment you `await` it the critical
+  section is no longer synchronous — two concurrent checkouts could both read
+  `inventory = 1`, both await the charge, and both succeed: the no-oversell guarantee
+  evaporates. Reversing the order (charge, then decrement) does not save it — you
+  discover the stock is gone *after* charging and now owe a refund. With two
+  independent systems and no distributed transaction there is **no ordering that
+  avoids compensation**; you only choose which failure you would rather compensate
+  for. The correct shape is **reserve → charge → confirm-or-release**: decrement
+  inventory synchronously (reserve) and **exit** the critical section; `await` the
+  gateway; then **re-enter** a second synchronous section to either confirm the order
+  or compensate (restore inventory, release the coupon). A consequence worth naming:
+  the coupon then needs a **`RESERVED`** state in addition to `AVAILABLE`/`REDEEMED`,
+  because it is held across the await and must not be spendable by another checkout
+  in the meantime.
 - **Rate limiting / observability / pagination** — out of scope for the timebox.
 
 **Dependency posture.** A fresh `npm ci` flagged 3 moderate advisories in `qs`
