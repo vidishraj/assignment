@@ -161,6 +161,13 @@ test('concurrent retries of one cart yield a single order', async () => {
     const results = await Promise.all(
       Array.from({ length: 6 }, () => api<Order>(server.baseUrl, 'POST', `/carts/${cartId}/checkout`)),
     );
+    // Each retry must actually SUCCEED with a real order id first — otherwise a
+    // Set of `undefined`s collapses to size 1 and the headline assert below
+    // would pass even if every request had failed.
+    for (const r of results) {
+      assert.ok(r.status === 200 || r.status === 201, `expected 2xx, got ${r.status}`);
+      assert.ok(typeof r.body.id === 'string' && r.body.id.length > 0, 'each retry returns an order id');
+    }
     const orderIds = new Set(results.map((r) => r.body.id));
     assert.equal(orderIds.size, 1, 'all retries resolve to the same order');
     assert.equal(deps.repos.products.get('p-hoodie')!.inventory, 0, 'charged exactly once');
