@@ -1,5 +1,7 @@
 # Reliable Checkout & Rewards Service
 
+[![CI](https://github.com/vidishraj/assignment/actions/workflows/ci.yml/badge.svg)](https://github.com/vidishraj/assignment/actions/workflows/ci.yml)
+
 A backend for an ecommerce store: customers create carts, add products, and check
 out; the store rewards purchasing activity by making a discount coupon available
 after every *n*th successfully placed order. The interesting part is not the CRUD —
@@ -78,6 +80,10 @@ round-half-up and clamped to the subtotal, so an order total is never negative.
 ---
 
 ## API
+
+A machine-readable **OpenAPI 3.1** spec covering every endpoint, schema, status,
+and error code is at [`be/openapi.yaml`](be/openapi.yaml) (the `/admin` routes are
+tagged administrative). The prose below is the same contract in narrative form.
 
 Base URL `http://localhost:3000`. Request and response bodies are JSON.
 **Administrative** operations are the `/admin/*` routes (identified by prefix;
