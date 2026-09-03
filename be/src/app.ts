@@ -1,5 +1,6 @@
 import express, { type Express } from 'express';
 import type { AppConfig } from './config.js';
+import { errorHandler } from './errors.js';
 
 /**
  * Dependencies an app instance needs. Passing them in (rather than importing a
@@ -19,6 +20,11 @@ export function createApp(deps: AppDeps): Express {
   app.get('/health', (_req, res) => {
     res.json({ status: 'ok', config: deps.config });
   });
+
+  // Routers (carts, checkout, …) are registered here as they are built.
+
+  // Must be last: turns thrown AppErrors into typed JSON responses.
+  app.use(errorHandler);
 
   return app;
 }
