@@ -24,10 +24,13 @@ export function buildDeps(config: Partial<AppConfig> = {}): AppDeps {
   const repos = makeRepositories();
   seedProducts(repos.products);
   // Rate limiting is off by default in tests (concurrency tests fire many
-  // requests from one IP); a dedicated test opts in with a low limit.
+  // requests from one IP); a dedicated test opts in with a low limit. The logger
+  // defaults to a no-op so the suite doesn't spew JSON; observability tests
+  // override `log` to capture entries.
   return {
     config: { milestoneInterval: 3, discountPercent: 10, rateLimit: null, ...config },
     repos,
+    log: () => {},
   };
 }
 
