@@ -174,8 +174,8 @@ paths:
         already-placed cart (the same order, no double charge). Validates the whole
         cart (and any coupon) before mutating anything. An optional Idempotency-Key
         header additionally protects cross-cart retries: the same key with the same
-        request returns the stored response; the same key with a different request is
-        rejected with 422.
+        request returns the same order with 200 (a replay creates nothing); the same
+        key with a different request is rejected with 422.
       parameters:
         - $ref: '#/components/parameters/CartId'
         - name: Idempotency-Key

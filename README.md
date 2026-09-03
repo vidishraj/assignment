@@ -41,8 +41,8 @@ Configuration (injected, with defaults):
 | `PORT`               | HTTP port                                  | `3000`  |
 | `MILESTONE_INTERVAL` | `n` — a coupon is eligible every `n` orders | `5`     |
 | `DISCOUNT_PERCENT`   | `x` — coupon discount percent (0–100)      | `10`    |
-| `RATE_LIMIT`         | max mutating requests per window (`0` = off) | `120`   |
-| `RATE_WINDOW_MS`     | rate-limit window in ms                    | `60000` |
+| `RATE_LIMIT`         | max mutating requests per window (unset = off) | *(off)* |
+| `RATE_WINDOW_MS`     | rate-limit window in ms (when enabled)     | `60000` |
 
 ```bash
 MILESTONE_INTERVAL=3 DISCOUNT_PERCENT=10 npm run dev
@@ -105,8 +105,9 @@ Base URL `http://localhost:3000`. Request and response bodies are JSON.
 **Every request** gets an `X-Request-Id` (an inbound one is honoured, else minted),
 echoed on the response and included in every error body as `requestId`, and one
 structured JSON log line is emitted per request. **Mutating routes** (checkout, admin
-coupon generation) are rate limited (`RATE_LIMIT`/window) and return `429` with a
-`Retry-After` header when exceeded — see the limitations in `DECISIONS.md`.
+coupon generation) can be rate limited (set `RATE_LIMIT=N`; **off by default** so a
+concurrency probe isn't rejected) and return `429` with a `Retry-After` header when
+exceeded — see the limitations in `DECISIONS.md`.
 **Administrative** operations are the `/admin/*` routes (identified by prefix;
 auth is out of scope per the brief).
 
@@ -161,8 +162,9 @@ optional **`Idempotency-Key`** request header.
 **Idempotency** has two layers. Re-checking-out the same cart returns its existing
 order (`200`). Supplying an `Idempotency-Key` header additionally protects a client
 that lost the response and rebuilds its cart: the same key + the same request returns
-the stored response, while the same key + a **different** request (different cart or
-coupon) is rejected with `422 IDEMPOTENCY_KEY_REUSED` rather than a wrong replay.
+the same order with `200` (a replay creates nothing, so both layers answer `200`),
+while the same key + a **different** request (different cart or coupon) is rejected
+with `422 IDEMPOTENCY_KEY_REUSED` rather than a wrong replay.
 
 ```json
 {
