@@ -22,8 +22,9 @@ note under *Testing strategy*).
    `sold + remaining == initial` holds across arbitrary concurrent checkouts.
 2. **All-or-nothing checkout.** A checkout either places the whole order or
    changes nothing — no line is charged while another fails.
-3. **At-most-once order per cart.** A cart produces at most one order; retries
-   return the same order and never charge inventory twice.
+3. **At-most-once order per retry.** A cart produces at most one order (retries
+   return the same order, never charging twice); an optional `Idempotency-Key`
+   extends that guarantee across carts for a client that lost the response.
 4. **Immutable order snapshot.** An order records the product name, unit price,
    quantity, and line total *as of checkout*, so it still explains itself after
    the catalogue changes.
@@ -45,14 +46,18 @@ The brief deliberately leaves several things unspecified. Each choice below is o
 an interviewer can probe, so I name the trade-off honestly.
 
 - **What is the idempotency unit?** The brief talks about retried checkouts but not
-  *how* a retry is identified. I made **the cart the idempotency unit**: a cart
-  checks out at most once, and re-checking-out a placed cart returns its existing
-  order. I did **not** implement an `Idempotency-Key` header.
-  *Honest limit:* this protects the realistic retry (same client, same cart, same
-  request replayed). A client that loses the response and then creates a **new
-  cart** with the same items will get a **second order** — the system cannot tell
-  those two intents apart without a client-supplied key. Naming this is the point;
-  see *Idempotency strategy* for how a key would slot in.
+  *how* a retry is identified. There are **two layers**. The **cart** is the base
+  unit — a cart checks out at most once, and re-checking-out a placed cart returns
+  its existing order (200); this covers the common same-cart replay. On top of that,
+  an optional **`Idempotency-Key`** header covers the harder case: a client that lost
+  the response and starts a **new cart** supplies the same key and is protected from
+  a second order. Same key + same request → the stored response; same key + a
+  *different* request (different cart or coupon) → `422 IDEMPOTENCY_KEY_REUSED`,
+  never a silently-wrong replay. Both layers are synchronous (a Map/row lookup) and
+  sit behind the repository seam. *Remaining honest limit:* the key store is
+  in-memory and **unbounded — no TTL/eviction**; a production version needs a bounded
+  store with expiry (and, across instances, a `UNIQUE` index on the key, which the
+  SQLite store already has).
 
 - **Coupon supplied on an idempotent retry.** If a cart is checked out **without**
   a coupon and the retry supplies one, the retry returns the **original order** —
@@ -123,25 +128,33 @@ the repository interface becomes a transaction (see *Multi-instance*). The criti
 section must contain **no `await`**; I treat that as an invariant of the checkout
 code and call it out in comments so a future edit doesn't silently break atomicity.
 
-### Decision: Cart as the idempotency unit
+### Decision: Two-layer idempotency (cart status + optional key)
 
-**Context:** A retried checkout must not create a second order or double-charge.
+**Context:** A retried checkout must not create a second order or double-charge —
+including the case where the client lost the response and starts a fresh cart.
 
 **Options considered:**
-- **A — `Idempotency-Key` header** deduplicated in a store.
-- **B — Cart status.** The cart transitions `OPEN → CHECKED_OUT` and links its order.
+- **A — Cart status only.** The cart transitions `OPEN → CHECKED_OUT` and links its
+  order; a re-checkout returns it. Simple, but a *new* cart with the same items is a
+  new checkout, so a lost-response client that rebuilds its cart double-orders.
+- **B — `Idempotency-Key` header only**, deduplicated in a store.
+- **C — Both**, layered.
 
-**Choice:** B — reuse the cart's own lifecycle as the dedup key.
+**Choice:** C. The cart status handles the common same-cart replay; an optional
+`Idempotency-Key` (a fingerprinted record behind the repository seam) handles the
+cross-cart retry. Same key + same request → the stored response; same key +
+*different* request → `422`, so a reused key can never return the wrong order.
 
-**Why:** In a single synchronous process there is no "in-flight window" to protect
-against, so a full idempotency-key subsystem is machinery the design doesn't need
-yet. The cart already has the identity and state to answer "did this check out?",
-and that check generalises cleanly to a conditional `UPDATE ... WHERE status =
-'OPEN'` across instances.
+**Why:** The cart layer needs no extra machinery and is enough for the realistic
+retry. The key layer closes the one honest gap the cart layer leaves, and it stays
+**synchronous** — a Map/row lookup, no suspension point, so the "zero async in the
+production path" invariant holds. Both generalise to a database: the cart check
+becomes `UPDATE ... WHERE status = 'OPEN'`, the key becomes a `UNIQUE` index (present
+in the SQLite store).
 
-**Consequences:** Simple and retry-safe for the realistic case. The honest gap
-(new cart → second order) is documented above. Adding an `Idempotency-Key` later is
-additive: dedup on the key at the HTTP edge, map it to the same cart resolution.
+**Consequences:** Retry-safe for both same-cart and cross-cart cases. The remaining
+honest limit is that the key store is unbounded with no TTL (named as the lead
+weakness) — production needs a bounded store with expiry.
 
 ### Decision: Immutable order snapshot
 
@@ -249,8 +262,12 @@ the boundary. The number is a policy knob, not a constant of the universe.
   serialize; the second observes the first's decrements. Coupon redemption sits in
   the same section, so two checkouts racing for one coupon resolve to exactly one
   redemption and one `COUPON_ALREADY_REDEEMED`.
-- **Idempotency:** cart status. First checkout: `201` + new order. Retry: `200` +
-  the same order, no new inventory movement.
+- **Idempotency:** two layers, both inside the same synchronous transaction as the
+  checkout. Cart status handles same-cart replay (first `201`, retry `200`, no new
+  inventory movement). An optional `Idempotency-Key` handles cross-cart retries —
+  looked up and stored in the same transaction, so two concurrent same-key requests
+  serialize and only one executes; a reused key with a different fingerprint is
+  `422`, never a wrong replay.
 - **A coupling worth naming:** checkout validates inventory *per cart line* and
   assumes each product appears at most once in a cart. That invariant is not enforced
   in checkout — it is owned by the cart service, where `addItem` **accumulates** onto
@@ -332,7 +349,8 @@ independently pinned.
 ## Implemented vs intentionally deferred
 
 **Implemented:** products/inventory, carts (create/add/update/remove/view with live
-totals), oversell-safe idempotent checkout, immutable orders, milestone coupon
+totals), oversell-safe idempotent checkout (cart status + optional `Idempotency-Key`),
+immutable orders, milestone coupon
 generation and single-use failure-safe redemption, admin report, a typed error
 model incl. malformed-body handling, the test suite above, an optional SQLite store
 behind the same repository interface (same suite green on both), an OpenAPI 3.1
@@ -388,9 +406,10 @@ repository interface stands in for:
   `UPDATE products SET inventory = inventory - :qty WHERE id = :id AND inventory >= :qty`
   and treat "0 rows affected" as `INSUFFICIENT_INVENTORY`, or `SELECT ... FOR UPDATE`
   the rows and decrement inside the transaction. No application lock needed.
-- **Order-per-cart idempotency:** a `UNIQUE` constraint on `orders.cart_id` (and/or
-  an `idempotency_key` column with a unique index) so a duplicate checkout fails the
-  insert and is translated back to "return the existing order."
+- **Order-per-cart idempotency:** a `UNIQUE` constraint on `orders.cart_id` so a
+  duplicate checkout fails the insert and is translated back to "return the existing
+  order." The `Idempotency-Key` store is the same pattern — a `UNIQUE(key)` index,
+  already present in the SQLite store's `idempotency_keys` table.
 - **One coupon per milestone:** a **`UNIQUE(milestone)` constraint** on the coupon
   table so two admins racing to generate cannot both insert.
 - **Single-use redemption:** redeem with
@@ -473,8 +492,10 @@ rather than a self-check that trusts them — is worth building. The miss is the
 
 ## What I would examine first given another two hours
 
-1. **A first-class `Idempotency-Key`** at the HTTP edge, closing the "new cart →
-   second order" gap that cart-based idempotency leaves open.
+1. **Bound the idempotency-key store.** The key is implemented, but its store is
+   unbounded with no TTL — it would grow without limit. I'd add expiry/eviction (and
+   in a real deployment, persist keys with the order in one transaction so a crash
+   between placing the order and storing the key can't lose the dedup record).
 2. **Genuine multi-process contention.** The SQLite store proves the seam and the
    transaction shape, but the tests still run in one process against `:memory:`. I'd
    run multiple instances against a shared file/server database and hammer them with

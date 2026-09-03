@@ -172,9 +172,17 @@ paths:
       description: >
         Returns 201 on the first placement and 200 on an idempotent retry of an
         already-placed cart (the same order, no double charge). Validates the whole
-        cart (and any coupon) before mutating anything.
+        cart (and any coupon) before mutating anything. An optional Idempotency-Key
+        header additionally protects cross-cart retries: the same key with the same
+        request returns the stored response; the same key with a different request is
+        rejected with 422.
       parameters:
         - $ref: '#/components/parameters/CartId'
+        - name: Idempotency-Key
+          in: header
+          required: false
+          description: Retry-safety token; a reused key with a different request is a 422.
+          schema: { type: string }
       requestBody:
         required: false
         content:
@@ -206,6 +214,11 @@ paths:
               schema: { $ref: '#/components/schemas/Error' }
         '409':
           description: 'INSUFFICIENT_INVENTORY or COUPON_ALREADY_REDEEMED'
+          content:
+            application/json:
+              schema: { $ref: '#/components/schemas/Error' }
+        '422':
+          description: 'IDEMPOTENCY_KEY_REUSED (same key, different request)'
           content:
             application/json:
               schema: { $ref: '#/components/schemas/Error' }
@@ -373,6 +386,7 @@ components:
                 - CART_EMPTY
                 - ITEM_NOT_IN_CART
                 - CART_ALREADY_CHECKED_OUT
+                - IDEMPOTENCY_KEY_REUSED
                 - ORDER_NOT_FOUND
                 - COUPON_INVALID
                 - COUPON_ALREADY_REDEEMED

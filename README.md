@@ -139,10 +139,17 @@ Cart errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
 
 ### Checkout
 
-`POST /carts/:id/checkout` with optional `{ "couponCode": "SAVE10-3" }`.
+`POST /carts/:id/checkout` with optional `{ "couponCode": "SAVE10-3" }` and an
+optional **`Idempotency-Key`** request header.
 
 - **`201`** on the first placement, returning the order.
 - **`200`** on an idempotent retry, returning the **same** order (no double charge).
+
+**Idempotency** has two layers. Re-checking-out the same cart returns its existing
+order (`200`). Supplying an `Idempotency-Key` header additionally protects a client
+that lost the response and rebuilds its cart: the same key + the same request returns
+the stored response, while the same key + a **different** request (different cart or
+coupon) is rejected with `422 IDEMPOTENCY_KEY_REUSED` rather than a wrong replay.
 
 ```json
 {
@@ -156,7 +163,8 @@ Cart errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
 Checkout errors: `VALIDATION_ERROR` (400, malformed field — e.g. non-string
 `couponCode`), `CART_NOT_FOUND` (404), `CART_EMPTY` (400),
 `INSUFFICIENT_INVENTORY` (409, with `{ productId, requested, available }`),
-`COUPON_INVALID` (400), `COUPON_ALREADY_REDEEMED` (409).
+`COUPON_INVALID` (400), `COUPON_ALREADY_REDEEMED` (409),
+`IDEMPOTENCY_KEY_REUSED` (422, same key reused for a different request).
 A checkout that fails validation changes nothing — inventory and any supplied
 coupon are left untouched.
 
