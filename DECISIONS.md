@@ -353,8 +353,8 @@ totals), oversell-safe idempotent checkout (cart status + optional `Idempotency-
 immutable orders, milestone coupon
 generation and single-use failure-safe redemption, admin report, a typed error
 model incl. malformed-body handling, the test suite above, an optional SQLite store
-behind the same repository interface (same suite green on both), an OpenAPI 3.1
-document, and a GitHub Actions CI pipeline.
+behind the same repository interface (same suite green on both) with a multi-process
+contention proof, an OpenAPI 3.1 document, and a GitHub Actions CI pipeline.
 
 **Deferred, on purpose:**
 - **Frontend** — the brief marks it optional and says it "will not compensate for an
@@ -431,15 +431,30 @@ inside a real `BEGIN IMMEDIATE` transaction, and inventory is taken with the
 conditional decrement (`… WHERE inventory >= :qty`, 0 rows ⇒ `INSUFFICIENT_INVENTORY`)
 — the same primitive the bullets describe. `npm run test:sqlite` runs the **same**
 suite against SQLite and it passes; the memory and SQLite stores share one
-suite, one service layer, one set of invariants. Be precise about what this proves
-and what it doesn't: it proves the **seam is real** and the **transaction shape is
-correct** (the documented SQL is executable, not aspirational). It does **not** prove
-multi-process contention, because the tests still run in one process against an
-in-memory database — genuine cross-instance correctness rests on the database's own
-locking (`BEGIN IMMEDIATE` / `SELECT … FOR UPDATE`), which is where I'd take it next.
+suite, one service layer, one set of invariants — proving the **seam is real** and
+the **transaction shape is correct** (the documented SQL is executable, not
+aspirational).
+
+**And it holds under genuine multi-process contention.** `npm run test:contention`
+spawns **4 separate node processes**, each with its own connection to one shared
+SQLite **file** (not `:memory:`), all hammering checkout against a 50-unit scarce
+product and racing for a single coupon. From a fresh connection it asserts: exactly
+50 sold (`sold + remaining == initial`), inventory never negative, order count ==
+successful checkouts, and the coupon redeemed exactly once. It passes stably. This is
+the step the single-process suite *cannot* take, because it exercises real
+`BEGIN IMMEDIATE` lock contention rather than event-loop serialisation. Handling
+`SQLITE_BUSY`: the store sets `busy_timeout = 5000` (and WAL), so a writer that meets
+the lock **waits** rather than failing instantly; under these parameters no `BUSY`
+reached the application, but a worker that did see one counts it and retries on the
+next attempt — named here rather than hidden. Be precise about the *remaining* limit:
+a single-node SQLite file is still **not** a multi-node production database (no
+network partitions, no replica lag, one machine's filesystem lock) — it demonstrates
+the concurrency *design* survives real inter-process locking, not that a distributed
+deployment is proven.
+
 better-sqlite3 is optional and loaded lazily, so a machine that can't build the
-native module still gets a green `npm ci` and default `npm test`; the SQLite suite
-skips with a clear message.
+native module still gets a green `npm ci` and default `npm test`; the SQLite and
+contention scripts skip with a clear message.
 
 ---
 
@@ -496,11 +511,11 @@ rather than a self-check that trusts them — is worth building. The miss is the
    unbounded with no TTL — it would grow without limit. I'd add expiry/eviction (and
    in a real deployment, persist keys with the order in one transaction so a crash
    between placing the order and storing the key can't lose the dedup record).
-2. **Genuine multi-process contention.** The SQLite store proves the seam and the
-   transaction shape, but the tests still run in one process against `:memory:`. I'd
-   run multiple instances against a shared file/server database and hammer them with
-   concurrent checkouts to prove the `BEGIN IMMEDIATE` / conditional-decrement story
-   holds under real cross-process contention, not just a single event loop.
+2. **A true multi-node deployment.** The contention test proves the design survives
+   inter-*process* locking on one machine; the next step is a real server database
+   (Postgres) across multiple nodes, where `SELECT … FOR UPDATE` / conditional
+   `UPDATE` replace SQLite's file lock and where partitions and replica lag are
+   actually in play — the class of failure a single-node file cannot exercise.
 3. **An actually-implemented `reserve → charge → confirm-or-release` payment flow.**
    Today checkout treats success as payment; I'd add the two-phase flow described in
    the payment deferral (reserve synchronously, exit the section, await a fake

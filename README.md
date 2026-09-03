@@ -66,6 +66,11 @@ inside a real `BEGIN IMMEDIATE` transaction. `better-sqlite3` is an *optional* n
 dependency — if it isn't installed, `test:sqlite` skips cleanly and the default
 `npm test` and `npm ci` are unaffected.
 
+**Multi-process contention.** `npm run test:contention` spawns 4 separate processes
+against one shared SQLite *file* and asserts no oversell / conservation / single
+coupon redemption under real `BEGIN IMMEDIATE` lock contention (also optional, also
+skips cleanly). See the multi-instance section of `DECISIONS.md`.
+
 ## Seed data
 
 Six products are seeded on startup, including deliberately scarce stock so
